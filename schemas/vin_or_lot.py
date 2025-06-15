@@ -2,7 +2,7 @@ from typing import Union
 
 from pydantic import BaseModel, field_validator
 
-from vinas_external_api_app.src.vinas_external_api_app.auction_api.utils import AuctionApiUtils
+from auction_api.utils import AuctionApiUtils
 
 
 class VinOrLotIn(BaseModel):

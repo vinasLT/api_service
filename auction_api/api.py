@@ -1,14 +1,11 @@
 import asyncio
-
-import httpx
 from pydantic import HttpUrl
 
-from vinas_external_api_app.src.vinas_external_api_app.basic_api import BaseClientIn, BaseClient
-
-from vinas_external_api_app.src.vinas_external_api_app.auction_api.types import EndpointSchema, LotByIDIn, \
-    BasicLot, LotByVINIn, BasicHistoryLot, CurrentBidOut
-from vinas_external_api_app.src.vinas_external_api_app.config import AUCTION_API_KEY
-from vinas_external_api_app.src.vinas_external_api_app.exptions import BadRequestException
+from auction_api import EndpointSchema
+from auction_api.types import LotByIDIn, BasicLot, BasicHistoryLot, LotByVINIn, CurrentBidOut
+from basic_api import BaseClient, BaseClientIn
+from config import AUCTION_API_KEY
+from exptions import BadRequestException
 
 
 class AuctionApiClient(BaseClient):

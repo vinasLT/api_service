@@ -1,16 +1,20 @@
 from contextlib import asynccontextmanager
 from typing import List
 
+import redis
 import uvicorn
 from fastapi import FastAPI, Request, Query
+from fastapi_cache import FastAPICache, default_key_builder
+from fastapi_cache.backends.redis import RedisBackend
 from starlette.responses import JSONResponse
 
 from fastapi_cache.decorator import cache
-from vinas_external_api_app.src.vinas_external_api_app.auction_api.api import AuctionApiClient
-from vinas_external_api_app.src.vinas_external_api_app.auction_api.types import LotByIDIn, BasicLot, LotByVINIn, \
-    BasicHistoryLot, CurrentBidOut
-from vinas_external_api_app.src.vinas_external_api_app.exptions import BadRequestException
-from vinas_external_api_app.src.vinas_external_api_app.schemas.vin_or_lot import VinOrLotIn
+
+from auction_api.api import AuctionApiClient
+from auction_api.types import BasicLot, BasicHistoryLot, LotByIDIn, LotByVINIn, CurrentBidOut
+from config import REDIS_URL
+from exptions import BadRequestException
+from schemas.vin_or_lot import VinOrLotIn
 
 api: AuctionApiClient | None = None
 
@@ -18,6 +22,8 @@ api: AuctionApiClient | None = None
 async def lifespan(app: FastAPI):
     global api
     api = AuctionApiClient()
+    redis_client = redis.Redis.from_url(REDIS_URL)
+    FastAPICache.init(RedisBackend(redis_client), prefix="fastapi-cache")
     yield
 
 app = FastAPI(lifespan=lifespan)

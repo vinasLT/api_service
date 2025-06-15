@@ -3,7 +3,7 @@ from typing import Type, Literal, Optional, List, Union
 
 from pydantic import BaseModel, PositiveInt, HttpUrl, field_validator, Field
 
-from vinas_external_api_app.src.vinas_external_api_app.auction_api.utils import AuctionApiUtils
+from auction_api.utils import AuctionApiUtils
 
 
 class EndpointSchema(BaseModel):

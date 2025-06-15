@@ -3,11 +3,13 @@ from typing import List
 
 from pydantic import BaseModel
 
+from auction_api import EndpointSchema
+from auction_api.utils import AuctionApiUtils
+from exptions import BadRequestException
 from .types import BaseClientIn
 import httpx
-from vinas_external_api_app.src.vinas_external_api_app.auction_api import EndpointSchema
-from ..auction_api.utils import AuctionApiUtils
-from ..exptions import BadRequestException
+
+
 
 
 class BaseClient:

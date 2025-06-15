@@ -3,8 +3,7 @@ from typing import Union
 
 from pydantic import BaseModel
 
-from vinas_external_api_app.src.vinas_external_api_app.exptions import BadRequestException
-
+from exptions import BadRequestException
 
 
 class AuctionApiUtils:
