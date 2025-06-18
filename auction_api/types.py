@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Type, Literal, Optional, List, Union
 
-from pydantic import BaseModel, PositiveInt, HttpUrl, field_validator, Field
+from pydantic import BaseModel, PositiveInt, HttpUrl, field_validator, Field, model_validator
 
 from auction_api.utils import AuctionApiUtils
 
@@ -19,13 +19,13 @@ class BasicLot(BaseModel):
     lot_id: int
     site: int
     base_site: str
-    salvage_id: Optional[str]
+    salvage_id: Optional[int]
     odometer: Optional[int]
     price_new: Optional[int]
     price_future: Optional[int]
     reserve_price: Optional[int]
-    current_bid: Optional[int]
-    auction_date: Optional[datetime]
+    current_bid: Optional[int] = Field(0)
+    auction_date: Optional[datetime] = Field(None)
     cost_priced: Optional[int]
     cost_repair: Optional[int]
     year: Optional[int]
@@ -67,10 +67,10 @@ class BasicLot(BaseModel):
     is_offsite: bool
     location_offsite: Optional[str]
     link: HttpUrl
-    body_type: Optional[str]
+    body_type: Optional[str] = Field(None)
     seller_type: Optional[str]
     vehicle_score: Optional[str]
-    form_get_type: str = Field(default='active')
+    form_get_type: str = Field(default='history')
 
 
 class SaleHistoryItem(BaseModel):
@@ -86,6 +86,18 @@ class SaleHistoryItem(BaseModel):
     buyer_country: Optional[str]
     vehicle_type: Optional[str]
 
+    @model_validator(mode="before")
+    @classmethod
+    def validate_together(cls, data: dict):
+        base_site = data.get("base_site")
+        site = data.get("site")
+
+        if not base_site:
+            data["base_site"] = AuctionApiUtils.num_to_auction_name(site)
+
+        return data
+
+
 
 class BasicHistoryLot(BasicLot):
     sale_history: Optional[List[SaleHistoryItem]]
@@ -96,7 +108,7 @@ class BasicHistoryLot(BasicLot):
 
 class LotByIDIn(BaseModel):
     lot_id: PositiveInt
-    site: Union[int, str]
+    site: Optional[Union[int, str]]
 
     @field_validator('site')
     @classmethod
@@ -105,7 +117,7 @@ class LotByIDIn(BaseModel):
 
 class LotByVINIn(BaseModel):
     vin: str
-    site: Union[int, str]
+    site: Optional[Union[int, str]]
 
 class CurrentBidOut(BaseModel):
     pre_bid: PositiveInt

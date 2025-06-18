@@ -42,6 +42,20 @@ class AuctionApiClient(BaseClient):
         out_schema_default=CurrentBidOut
     )
 
+    GET_LOT_HISTORY_BY_ID = EndpointSchema(
+        validation_schema=LotByIDIn,
+        method='GET',
+        endpoint='sale-histories/lot-id/',
+        out_schema_default=BasicHistoryLot,
+    )
+    HISTORY_VIN_ENDPOINT = 'sale-histories/vin/'
+    GET_LOT_HISTORY_BY_VIN = EndpointSchema(
+        validation_schema=LotByVINIn,
+        method='GET',
+        endpoint=HISTORY_VIN_ENDPOINT,
+        out_schema_default=BasicHistoryLot,
+    )
+
 
     def __init__(self):
         data = BaseClientIn(
@@ -73,6 +87,9 @@ class AuctionApiClient(BaseClient):
             out_schema = schema.out_schema_history if self.is_item_history(response_data) else schema.out_schema_default
         else:
             out_schema = schema.out_schema_default
+
+        if schema.endpoint == self.HISTORY_VIN_ENDPOINT:
+            response_data = response_data['data']
 
         return out_schema.model_validate(response_data)
 

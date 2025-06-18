@@ -27,7 +27,9 @@ class AuctionApiUtils:
         return num
 
     @classmethod
-    def normalize_auction_to_num(cls, auction: Union[str, int])-> int:
+    def normalize_auction_to_num(cls, auction: Union[str, int])-> int | None:
+        if auction is None:
+            return auction
         if isinstance(auction, str) and not auction.isdigit():
             return cls.auction_name_to_num(auction)
         elif isinstance(auction, int):
