@@ -16,75 +16,75 @@ class EndpointSchema(BaseModel):
 
 
 class BasicLot(BaseModel):
-    lot_id: int
-    site: int
-    base_site: str
-    salvage_id: Optional[int]
-    odometer: Optional[int]
-    price_new: Optional[int]
-    price_future: Optional[int]
-    reserve_price: Optional[int]
-    current_bid: Optional[int] = Field(0)
-    auction_date: Optional[datetime] = Field(None)
-    cost_priced: Optional[int]
-    cost_repair: Optional[int]
-    year: Optional[int]
-    cylinders: Optional[int]
-    state: Optional[str]
-    vehicle_type: Optional[str]
-    auction_type: Optional[str]
-    make: Optional[str]
-    model: Optional[str]
-    series: Optional[str]
-    damage_pr: Optional[str]
-    damage_sec: Optional[str]
-    keys: Optional[str]
-    odobrand: Optional[str]
-    fuel: Optional[str]
-    drive: Optional[str]
-    transmission: Optional[str]
-    color: Optional[str]
-    status: Optional[str]
-    title: Optional[str]
-    vin: Optional[str]
-    engine: Optional[str]
-    engine_size: Optional[float]
-    location: Optional[str]
-    location_old: Optional[str]
-    location_id: Optional[int]
-    country: Optional[str]
-    document: Optional[str]
-    document_old: Optional[str]
-    currency: Optional[str]
-    seller: Optional[str]
-    is_buynow: bool
-    iaai_360: Optional[str]
-    copart_exterior_360: List[str]
-    copart_interior_360: Optional[str]
-    video: Optional[str]
-    link_img_hd: List[HttpUrl]
-    link_img_small: List[HttpUrl]
-    is_offsite: bool
-    location_offsite: Optional[str]
-    link: HttpUrl
-    body_type: Optional[str] = Field(None)
-    seller_type: Optional[str]
-    vehicle_score: Optional[str]
+    lot_id: Optional[int] = None
+    site: Optional[int] = None
+    base_site: Optional[str] = None
+    salvage_id: Optional[int] = None
+    odometer: Optional[int] = None
+    price_new: Optional[int] = None
+    price_future: Optional[int] = None
+    reserve_price: Optional[int] = None
+    current_bid: Optional[int] = None
+    auction_date: Optional[datetime] = None
+    cost_priced: Optional[int] = None
+    cost_repair: Optional[int] = None
+    year: Optional[int] = None
+    cylinders: Optional[int] = None
+    state: Optional[str] = None
+    vehicle_type: Optional[str] = None
+    auction_type: Optional[str] = None
+    make: Optional[str] = None
+    model: Optional[str] = None
+    series: Optional[str] = None
+    damage_pr: Optional[str] = None
+    damage_sec: Optional[str] = None
+    keys: Optional[str] = None
+    odobrand: Optional[str] = None
+    fuel: Optional[str] = None
+    drive: Optional[str] = None
+    transmission: Optional[str] = None
+    color: Optional[str] = None
+    status: Optional[str] = None
+    title: Optional[str] = None
+    vin: Optional[str] = None
+    engine: Optional[str] = None
+    engine_size: Optional[float] = None
+    location: Optional[str] = None
+    location_old: Optional[str] = None
+    location_id: Optional[int] = None
+    country: Optional[str] = None
+    document: Optional[str] = None
+    document_old: Optional[str] = None
+    currency: Optional[str] = None
+    seller: Optional[str] = None
+    is_buynow: Optional[bool] = None
+    iaai_360: Optional[str] = None
+    copart_exterior_360: Optional[List[str]] = None
+    copart_interior_360: Optional[str] = None
+    video: Optional[str] = None
+    link_img_hd: Optional[List[HttpUrl]] = None
+    link_img_small: Optional[List[HttpUrl]] = None
+    is_offsite: Optional[bool] = None
+    location_offsite: Optional[str] = None
+    link: Optional[HttpUrl] = None
+    body_type: Optional[str] = None
+    seller_type: Optional[str] = None
+    vehicle_score: Optional[str] = None
     form_get_type: str = Field(default='history')
 
 
 class SaleHistoryItem(BaseModel):
-    lot_id: int
-    site: int
-    base_site: str
-    vin: str
-    sale_status: str
-    sale_date: datetime
-    purchase_price: Optional[int]
-    is_buynow: bool
-    buyer_state: Optional[str]
-    buyer_country: Optional[str]
-    vehicle_type: Optional[str]
+    lot_id: Optional[int] = None
+    site: Optional[int] = None
+    base_site: Optional[str] = None
+    vin: Optional[str] = None
+    sale_status: Optional[str] = None
+    sale_date: Optional[datetime] = None
+    purchase_price: Optional[int] = None
+    is_buynow: Optional[bool] = None
+    buyer_state: Optional[str] = None
+    buyer_country: Optional[str] = None
+    vehicle_type: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
