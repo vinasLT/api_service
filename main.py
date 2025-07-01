@@ -38,7 +38,7 @@ async def bad_request_exception_handler(request: Request, exc: BadRequestExcepti
 
 
 @app.get("/cars/", response_model=List[BasicLot] | List[BasicHistoryLot])
-@cache(expire=60*30, key_builder=default_key_builder)
+@cache(expire=60*60*24, key_builder=default_key_builder)
 async def get_by_lot_id_or_vin(
     site: Optional[Union[int, str]] = Query(None),
     vin_or_lot: str = Query(...),
@@ -55,18 +55,18 @@ async def get_by_lot_id_or_vin(
         return await api.request_with_schema(api.GET_LOT_BY_VIN_FOR_ALL_TIME, in_data)
 
 @app.get("/cars/current-bid/", response_model=CurrentBidOut)
-@cache(expire=60*10, key_builder=default_key_builder)
+@cache(expire=60*60*24, key_builder=default_key_builder)
 async def get_current_bid(data: LotByIDIn = Query()):
     return await api.request_with_schema(api.GET_CURRENT_BID_FOR_LOT, data)
 
 @app.get("/cars/history/vin/", response_model=BasicHistoryLot)
-@cache(expire=60*60, key_builder=default_key_builder)
+@cache(expire=60*60*24, key_builder=default_key_builder)
 async def get_history_by_vin(vin: str = Query(...), site: str = Query(...)):
     data = LotByVINIn(vin=vin, site=site)
     return await api.request_with_schema(AuctionApiClient.GET_LOT_HISTORY_BY_VIN, data)
 
 @app.get("/cars/history/lot-id/", response_model=BasicHistoryLot)
-@cache(expire=60*60, key_builder=default_key_builder)
+@cache(expire=60*60*24, key_builder=default_key_builder)
 async def get_history_by_vin(lot_id: int = Query(...), site: str = Query(...)):
     data = LotByIDIn(lot_id=lot_id, site=site)
     return await api.request_with_schema(AuctionApiClient.GET_LOT_HISTORY_BY_ID, data)
