@@ -100,10 +100,10 @@ class SaleHistoryItem(BaseModel):
 
 
 class BasicHistoryLot(BasicLot):
-    sale_history: Optional[List[SaleHistoryItem]]
-    sale_date: Optional[datetime]
-    sale_status: Optional[str]
-    purchase_price: Optional[int]
+    sale_history: Optional[List[SaleHistoryItem]] = None
+    sale_date: Optional[datetime] = None
+    sale_status: Optional[str] = None
+    purchase_price: Optional[int] = None
 
 
 class LotByIDIn(BaseModel):

@@ -35,12 +35,10 @@ async def bad_request_exception_handler(request: Request, exc: BadRequestExcepti
         content={"detail": exc.message, "code": exc.short_message},
     )
 
-
-
-@app.get("/cars/", response_model=List[BasicLot] | List[BasicHistoryLot])
+@app.get("/cars/", response_model=List[BasicLot])
 @cache(expire=60*60*24, key_builder=default_key_builder)
 async def get_by_lot_id_or_vin(
-    site: Optional[Union[int, str]] = Query(None),
+    site: Optional[str] = Query(default=None),
     vin_or_lot: str = Query(...),
 ):
     data = VinOrLotIn(site=site, vin_or_lot=vin_or_lot)
@@ -53,6 +51,23 @@ async def get_by_lot_id_or_vin(
     else:
         in_data = LotByVINIn(vin=vin_or_lots, site=data.site)
         return await api.request_with_schema(api.GET_LOT_BY_VIN_FOR_ALL_TIME, in_data)
+
+# @app.get("/cars/", response_model=List[BasicLot] | List[BasicHistoryLot])
+# @cache(expire=60*60*24, key_builder=default_key_builder)
+# async def get_by_lot_id_or_vin(
+#     site: Optional[Union[int, str]] = Query(None),
+#     vin_or_lot: str = Query(...),
+# ):
+#     data = VinOrLotIn(site=site, vin_or_lot=vin_or_lot)
+#
+#     vin_or_lots = data.vin_or_lot.replace(" ", "").upper()
+#
+#     if vin_or_lots.isdigit():
+#         in_data = LotByIDIn(lot_id=int(vin_or_lots), site=data.site)
+#         return await api.request_with_schema(api.GET_LOT_BY_ID_FOR_ALL_TIME, in_data)
+#     else:
+#         in_data = LotByVINIn(vin=vin_or_lots, site=data.site)
+#         return await api.request_with_schema(api.GET_LOT_BY_VIN_FOR_ALL_TIME, in_data)
 
 @app.get("/cars/current-bid/", response_model=CurrentBidOut)
 @cache(expire=60*60*24, key_builder=default_key_builder)
