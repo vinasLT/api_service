@@ -12,7 +12,7 @@ from fastapi_cache.decorator import cache
 
 from auction_api.api import AuctionApiClient
 from auction_api.types import BasicLot, BasicHistoryLot, LotByIDIn, LotByVINIn, CurrentBidOut
-from config import REDIS_URL
+from config import settings
 from exptions import BadRequestException
 from schemas.vin_or_lot import VinOrLotIn
 
@@ -22,11 +22,23 @@ api: AuctionApiClient | None = None
 async def lifespan(app: FastAPI):
     global api
     api = AuctionApiClient()
-    redis_client = redis.Redis.from_url(REDIS_URL)
+    redis_client = redis.Redis.from_url(settings.REDIS_URL)
     FastAPICache.init(RedisBackend(redis_client), prefix="fastapi-cache")
     yield
 
-app = FastAPI(lifespan=lifespan)
+
+docs_url = "/docs" if settings.enable_docs else None
+redoc_url = "/redoc"  if settings.enable_docs else None
+openapi_url = "/openapi.json" if settings.enable_docs else None
+app = FastAPI(lifespan=lifespan,
+              root_path=settings.ROOT_PATH,
+              title="Auction Api Service",
+              description="Api for VinasLT",
+              version="0.0.1",
+              docs_url=docs_url,
+              redoc_url=redoc_url,
+              openapi_url=openapi_url,
+              )
 
 @app.exception_handler(BadRequestException)
 async def bad_request_exception_handler(request: Request, exc: BadRequestException):

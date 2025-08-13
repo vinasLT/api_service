@@ -1,17 +1,55 @@
-name: Build and Push Docker Image
+name: CI/CD with Push vs PR Logic
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main, dev ]
+
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  build-push-deploy:
+  test:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+          installer-parallel: true
+
+      - name: Cache poetry dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            venv-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: poetry install --no-root
+
+      - name: Run tests
+        run: |
+          echo "Running tests..."
+          poetry run pytest || ([ $? -eq 5 ] && echo "⚠️ No tests found - continuing anyway" || exit $?)
+
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -22,11 +60,33 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push image
+      - name: Build and push multi-platform image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile
-
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service:latest
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Deploy on server via SSH
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          debug: true
+          script: |
+            set -x
+            echo "🔁 Pulling latest Docker image..."
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service:latest
+            
+            echo "📦 Composing up..."
+            cd /srv/vinaslt/deploy_conf
+            docker compose up -d --build
