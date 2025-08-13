@@ -4,7 +4,7 @@ from pydantic import HttpUrl
 from auction_api import EndpointSchema
 from auction_api.types import LotByIDIn, BasicLot, BasicHistoryLot, LotByVINIn, CurrentBidOut, SaleHistoryItem
 from basic_api import BaseClient, BaseClientIn
-from config import AUCTION_API_KEY
+from config import settings
 from exptions import BadRequestException
 
 
@@ -62,7 +62,7 @@ class AuctionApiClient(BaseClient):
     def __init__(self):
         data = BaseClientIn(
             base_url=HttpUrl('https://api.apicar.store/api'),
-            api_key=AUCTION_API_KEY,
+            api_key=settings.AUCTION_API_KEY,
             header_name="api-key"
         )
         super().__init__(data)
