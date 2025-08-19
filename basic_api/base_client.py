@@ -1,13 +1,15 @@
 from abc import abstractmethod
-from typing import List
+from typing import List, TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from auction_api import EndpointSchema
-from auction_api.utils import AuctionApiUtils
+
 from exptions import BadRequestException
 from .types import BaseClientIn
 import httpx
+
+if TYPE_CHECKING:
+    from auction_api.api import EndpointSchema
 
 
 
@@ -23,12 +25,13 @@ class BaseClient:
 
     async def _make_request(self, method: str, url: str, **kwargs) -> httpx.Response:
         headers = {self.header_name: self.api_key}
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=10) as client:
             return await client.request(method, url, headers=headers, **kwargs)
 
-    async def request_with_schema(self, schema: EndpointSchema, data: BaseModel) -> BaseModel | List[BaseModel]:
-        url = self._build_url(AuctionApiUtils.set_value_in_path(schema.endpoint, data))
+    async def request_with_schema(self, schema: "EndpointSchema", data: BaseModel, **kwargs) -> BaseModel | List[BaseModel]:
+        url = self._build_url(schema.endpoint.format(**kwargs))
         payload = data.model_dump(exclude_none=True)
+        print(payload)
 
         if schema.method == "GET":
             response = await self._make_request("GET", url, params=payload)
@@ -46,7 +49,7 @@ class BaseClient:
         return self.process_response(response_data, schema)
 
     @abstractmethod
-    def process_response(self, response_data: dict | list, schema: EndpointSchema) -> BaseModel | List[BaseModel]:
+    def process_response(self, response_data: dict | list, schema: "EndpointSchema") -> BaseModel | List[BaseModel]:
         ...
 
 

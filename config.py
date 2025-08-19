@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     def enable_docs(self) -> bool:
         return self.ENVIRONMENT in [Environment.DEVELOPMENT]
 
+    # Database
+    DB_HOST: str = "localhost"
+    DB_PORT: str = "5432"
+    DB_NAME: str = "test_db"
+    DB_USER: str = "postgres"
+    DB_PASS: str = "testpass"
 
     #Redis
     REDIS_URL: str
