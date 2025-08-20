@@ -2,15 +2,13 @@ from contextlib import asynccontextmanager
 
 import redis
 import uvicorn
-from fastapi import FastAPI, Request, APIRouter
+from fastapi import FastAPI, APIRouter
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
 
 from fastapi_problem.handler import new_exception_handler, add_exception_handler
-from starlette.responses import JSONResponse
 
 from config import settings
-from exptions import BadRequestException
 from routers.v1.lots import cars_router
 from routers.v1.history_lots import history_cars_router
 
@@ -38,12 +36,6 @@ app = FastAPI(lifespan=lifespan,
 eh = new_exception_handler()
 add_exception_handler(app, eh)
 
-@app.exception_handler(BadRequestException)
-async def bad_request_exception_handler(request: Request, exc: BadRequestException):
-    return JSONResponse(
-        status_code=400,
-        content={"detail": exc.message, "code": exc.short_message},
-    )
 
 public_v1_router = APIRouter(prefix="/public/v1")
 

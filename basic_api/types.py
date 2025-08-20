@@ -1,6 +1,4 @@
-from typing import Literal, Type
-
-from pydantic import BaseModel, HttpUrl, PositiveInt
+from pydantic import BaseModel, HttpUrl
 
 
 class BaseClientIn(BaseModel):

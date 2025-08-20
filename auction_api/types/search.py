@@ -58,11 +58,23 @@ class SellerTypeEnum(str, Enum):
     INSURANCE = 'insurance'
     DEALER = 'dealer'
 
-class CommonSearchParams(BaseModel):
+
+class SiteIn(BaseModel):
+    site: Optional[SiteEnum] = Field(..., description="Auction site 1 or 2 or copart or iaai")
+
+    @field_validator('site', mode='after')
+    @classmethod
+    def validate_site(cls, v):
+        if v is None:
+            return v
+        return SiteEnum(str(AuctionApiUtils.normalize_auction_to_num(v)))
+
+
+
+class CommonSearchParams(SiteIn):
     make: Optional[str] = Field(None, description="Vehicle make")
     model: Optional[str] = Field(None, description="Vehicle model")
     vehicle_type: Optional[str] = Field(None, description="Vehicle type")
-    site: Optional[SiteEnum] = Field(None, description="Auction site (Copart or IAAI)")
     year_from: Optional[int] = Field(None, ge=1900, le=2030, description="Year from")
     year_to: Optional[int] = Field(None, ge=1900, le=2030, description="Year to")
     auction_date_from: Optional[datetime] = Field(None, description="Auction date from, '2025-08-18'",
@@ -87,11 +99,6 @@ class CommonSearchParams(BaseModel):
     size: Optional[int] = Field(10, ge=1, le=30, description="Lots per page (max 30)")
 
     model_config = ConfigDict(use_enum_values=True)
-
-    @field_validator('site')
-    @classmethod
-    def validate_site(cls, v)-> str:
-        return str(AuctionApiUtils.normalize_auction_to_num(v))
 
 
 class CurrentSearchParams(CommonSearchParams):

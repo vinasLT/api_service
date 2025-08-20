@@ -1,7 +1,7 @@
-from datetime import datetime, UTC
+
 from typing import List, TYPE_CHECKING
 
-from sqlalchemy import Column, Integer, String, DateTime, Boolean
+from sqlalchemy import Integer, String
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 
 from database.models import Base

@@ -3,13 +3,14 @@ from datetime import datetime, UTC
 from enum import Enum
 from typing import Optional, Literal
 
-from pydantic import HttpUrl, BaseModel
+from pydantic import HttpUrl, BaseModel, ValidationError
+from rfc9457 import BadRequestProblem
 
 from auction_api.types.lot import BasicLot, BasicHistoryLot
 from auction_api.types.search import BasicManyCurrentLots, HistorySearchParams, CurrentSearchParams
 from basic_api import BaseClient, BaseClientIn
 from config import settings
-from exptions import BadRequestException
+from core.logger import logger
 from request_schemas.lot import LotByIDIn, LotByVINIn, CurrentBidOut
 
 
@@ -93,7 +94,6 @@ class AuctionApiClient(BaseClient):
         out_schema_default=BasicHistoryLot,
     )
 
-
     GET_CURRENT_LOTS = EndpointSchema(
         validation_schema=CurrentSearchParams,
         method='GET',
@@ -143,17 +143,18 @@ class AuctionApiClient(BaseClient):
 
                 now = datetime.now(UTC)
                 return dt_object <= now
-            else:
-                return True
-            # TODO: replace exception
-            raise BadRequestException('Wrong form_get_type', 'wrong_form_get_type')
+        return True
 
-    def process_response(self, response_data: dict | list, schema: EndpointSchema):
+    def process_response(self, response_data: dict, schema: EndpointSchema):
+        logger.debug(f'Processing response data: {response_data}')
+        if response_data is None:
+            logger.error('No data from API, "response_data" is None"')
+            raise BadRequestProblem(detail='Not data from API')
         if schema.is_pagination and schema.pagination_schema:
-            if schema.is_pagination and schema.pagination_schema:
-                if isinstance(response_data, dict) and 'data' in response_data:
+            if isinstance(response_data, dict) and 'data' in response_data:
+                try:
                     processed_items = []
-                    for item in response_data['data']:
+                    for item in response_data.get('data', []):
                         item_schema = (
                             schema.out_schema_history
                             if schema.out_schema_history and self.is_item_history(item)
@@ -169,26 +170,34 @@ class AuctionApiClient(BaseClient):
                         'data': processed_items
                     }
                     return schema.pagination_schema.model_validate(paginated_response)
+                except ValidationError as e:
+                    logger.error(f'Validation error in pagination schema: {e}',
+                                 extra={'response_data': response_data, 'schema': schema.__name__, 'error': e})
+                    raise BadRequestProblem(detail='Validation error in data from API')
 
         if schema.endpoint in [Endpoint.HISTORY_BY_VIN, Endpoint.HISTORY_BY_ID]:
             response_data = response_data.get('data', response_data)
+        try:
+            if schema.out_schema_history is not None:
 
-        if schema.out_schema_history is not None:
-            if isinstance(response_data, list):
-                processed_items = [
-                    (schema.out_schema_history if self.is_item_history(item)
-                     else schema.out_schema_default).model_validate(item)
-                    for item in response_data
-                ]
-                return processed_items[0] if len(processed_items) == 1 else processed_items
+                if isinstance(response_data, list):
+                    processed_items = [
+                        (schema.out_schema_history if self.is_item_history(item)
+                         else schema.out_schema_default).model_validate(item)
+                        for item in response_data
+                    ]
+                    return processed_items[0] if len(processed_items) == 1 else processed_items
 
-            if isinstance(response_data, dict) and 'lot_id' in response_data:
-                return schema.out_schema_history.model_validate(response_data)
+                if isinstance(response_data, dict) and 'lot_id' in response_data:
+                    return schema.out_schema_history.model_validate(response_data)
 
-            if response_data and self.is_item_history(response_data):
-                return schema.out_schema_history.model_validate(response_data)
+                if response_data and self.is_item_history(response_data):
+                    return schema.out_schema_history.model_validate(response_data)
 
-        return schema.out_schema_default.model_validate(response_data)
+            return schema.out_schema_default.model_validate(response_data)
+        except ValidationError as e:
+            logger.error(f'Validation error in schema: {e}', extra={'response_data': response_data, 'schema': schema.__name__, 'error': e})
+            raise BadRequestProblem(detail='Validation error in data from API')
 
 if __name__ == '__main__':
     async def main():

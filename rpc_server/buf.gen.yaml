@@ -1,0 +1,16 @@
+version: v2
+inputs:
+  - module: buf.build/vinaslt/main:main
+
+plugins:
+  # Генерация основных Python классов (БЕЗ .pyi файлов)
+  - remote: buf.build/protocolbuffers/python:v28.3
+    out: gen/python
+
+  # Генерация gRPC сервисов
+  - remote: buf.build/grpc/python:v1.68.1
+    out: gen/python
+
+  # Генерация ТОЛЬКО .pyi файлов (type stubs)
+  - remote: buf.build/protocolbuffers/pyi:v28.3
+    out: gen/python

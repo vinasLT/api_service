@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     DB_USER: str = "postgres"
     DB_PASS: str = "testpass"
 
+    # gRPC
+    GRPC_SERVER_PORT: str = "50051"
+
     #Redis
     REDIS_URL: str
 
