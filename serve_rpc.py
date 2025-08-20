@@ -1,11 +1,15 @@
 import asyncio
+import os
+
 import grpc
 import signal
 import sys
 from grpc_health.v1 import health_pb2_grpc, health_pb2
 from grpc_reflection.v1alpha import reflection
 
-from rpc_server.gen.python.auction.v1 import lot_pb2, lot_pb2_grpc
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'rpc_server', 'gen', 'python'))
+
+from auction.v1 import lot_pb2, lot_pb2_grpc
 from config import settings, Environment
 from core.logger import logger
 from rpc_server.health import HealthCheckServicer
