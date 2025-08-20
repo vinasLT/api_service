@@ -1,4 +1,4 @@
-name: Optimized CI/CD Pipeline
+name: Fast Multi-arch Pipeline
 on:
   push:
     branches: [ main, dev ]
@@ -41,8 +41,17 @@ jobs:
 
   build:
     needs: test
-    runs-on: ubuntu-latest
     if: github.event_name == 'push'
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux/amd64
+            cache-tag: amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            cache-tag: arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -56,36 +65,41 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # КЛЮЧЕВАЯ ОПТИМИЗАЦИЯ: Registry cache
-      - name: Build and push with cache
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile
-          # ВАЖНО: Собираем только для AMD64 по умолчанию
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service:${{ github.sha }}
-          # Используем registry для кеширования слоев
-          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service:buildcache
-          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service:buildcache,mode=max
-          # Дополнительные оптимизации
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service:buildcache-${{ matrix.cache-tag }}
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service:buildcache-${{ matrix.cache-tag }},mode=max
 
-  # Отдельный job для ARM64 (запускается параллельно, только для dev)
-  build-arm64:
-    needs: test
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.cache-tag }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    needs: build
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -96,20 +110,16 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build ARM64 image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/arm64
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service:arm64
-          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service:buildcache-arm64
-          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service:buildcache-arm64,mode=max
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service:latest \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service:${{ github.sha }} \
+            $(printf '${{ secrets.DOCKERHUB_USERNAME }}/vinaslt_api_service@sha256:%s ' *)
 
   deploy:
-    needs: build  # Не ждем build-arm64
+    needs: merge
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:

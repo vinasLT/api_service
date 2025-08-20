@@ -9,6 +9,7 @@ from fastapi_cache.backends.redis import RedisBackend
 from fastapi_problem.handler import new_exception_handler, add_exception_handler
 
 from config import settings
+from routers.health import health_router
 from routers.v1.lots import cars_router
 from routers.v1.history_lots import history_cars_router
 
@@ -44,7 +45,7 @@ public_v1_router.include_router(history_cars_router, prefix='/lot/history', tags
 
 app.include_router(public_v1_router)
 
-
+app.include_router(health_router, tags=["Health"])
 
 
 
