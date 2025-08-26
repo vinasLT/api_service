@@ -172,7 +172,7 @@ class AuctionApiClient(BaseClient):
                     return schema.pagination_schema.model_validate(paginated_response)
                 except ValidationError as e:
                     logger.error(f'Validation error in pagination schema: {e}',
-                                 extra={'response_data': response_data, 'schema': schema.__name__, 'error': e})
+                                 extra={'response_data': response_data, 'error': e})
                     raise BadRequestProblem(detail='Validation error in data from API')
 
         if schema.endpoint in [Endpoint.HISTORY_BY_VIN, Endpoint.HISTORY_BY_ID]:

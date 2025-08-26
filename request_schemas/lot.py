@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field
 
-from auction_api.types.search import SiteIn
+from auction_api.types.common import SiteIn
 
 
 class LotByIDIn(SiteIn):

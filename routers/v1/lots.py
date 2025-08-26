@@ -5,6 +5,7 @@ from fastapi_cache.decorator import cache
 from auction_api.api import AuctionApiClient
 from auction_api.types.lot import BasicLot, BasicHistoryLot
 from auction_api.types.search import BasicManyCurrentLots, CurrentSearchParams
+from auction_api.utils import get_lot_vin_or_lot_id
 from core.logger import logger
 from dependencies.auction_api_service import get_auction_api_service
 from request_schemas.lot import LotByIDIn, LotByVINIn, CurrentBidOut
@@ -25,14 +26,7 @@ async def get_by_lot_id_or_vin(
     print(vin_or_lot)
     print(data.site)
 
-    if vin_or_lot.isdigit():
-        logger.debug(f'Request routed to get by lot_id - {vin_or_lot}', extra={'data': data.model_dump()})
-        in_data = LotByIDIn(site=data.site, lot_id=int(vin_or_lot))
-        return await api.request_with_schema(api.GET_LOT_BY_ID_FOR_ALL_TIME, in_data, lot_id=vin_or_lot)
-    else:
-        logger.debug(f'Request routed to get by vin - {vin_or_lot}', extra={'data': data.model_dump()})
-        in_data = LotByVINIn(vin=vin_or_lot, site=data.site)
-        return await api.request_with_schema(api.GET_LOT_BY_VIN_FOR_ALL_TIME, in_data)
+    return await get_lot_vin_or_lot_id(api, data.site, vin_or_lot)
 
 @cars_router.get("/current-bid", response_model=CurrentBidOut, description='Get current bid for lot by its lot_id')
 @cache(expire=60*10, key_builder=default_key_builder)

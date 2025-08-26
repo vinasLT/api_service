@@ -1,6 +1,15 @@
-from typing import Union
+from typing import Union, TYPE_CHECKING
 
 from pydantic_core import PydanticCustomError
+
+
+
+from core.logger import logger
+from request_schemas.lot import LotByIDIn, LotByVINIn
+
+if TYPE_CHECKING:
+    from auction_api.api import AuctionApiClient
+    from auction_api.types.search import SiteEnum
 
 
 class AuctionApiUtils:
@@ -35,4 +44,13 @@ class AuctionApiUtils:
             return int(auction)
         raise PydanticCustomError('wrong_auction', 'Wrong auction')
 
-
+async def get_lot_vin_or_lot_id(api: "AuctionApiClient", site: "SiteEnum", vin_or_lot_id: str):
+    vin_or_lot = vin_or_lot_id.replace(" ", "").upper()
+    if vin_or_lot.isdigit():
+        logger.debug(f'Request routed to get by lot_id - {vin_or_lot}', extra={'site': site, 'vin_or_lot_id': vin_or_lot})
+        in_data = LotByIDIn(site=site, lot_id=int(vin_or_lot))
+        return await api.request_with_schema(api.GET_LOT_BY_ID_FOR_ALL_TIME, in_data, lot_id=vin_or_lot)
+    else:
+        logger.debug(f'Request routed to get by vin - {vin_or_lot}',  extra={'site': site, 'vin_or_lot_id': vin_or_lot})
+        in_data = LotByVINIn(vin=vin_or_lot, site=site)
+        return await api.request_with_schema(api.GET_LOT_BY_VIN_FOR_ALL_TIME, in_data)

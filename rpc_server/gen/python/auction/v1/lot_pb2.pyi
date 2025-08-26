@@ -16,8 +16,56 @@ class GetLotRequest(_message.Message):
 class GetLotResponse(_message.Message):
     __slots__ = ("lot",)
     LOT_FIELD_NUMBER: _ClassVar[int]
-    lot: Lot
-    def __init__(self, lot: _Optional[_Union[Lot, _Mapping]] = ...) -> None: ...
+    lot: _containers.RepeatedCompositeFieldContainer[Lot]
+    def __init__(self, lot: _Optional[_Iterable[_Union[Lot, _Mapping]]] = ...) -> None: ...
+
+class GetSaleHistoryRequest(_message.Message):
+    __slots__ = ("lot_id", "site")
+    LOT_ID_FIELD_NUMBER: _ClassVar[int]
+    SITE_FIELD_NUMBER: _ClassVar[int]
+    lot_id: int
+    site: str
+    def __init__(self, lot_id: _Optional[int] = ..., site: _Optional[str] = ...) -> None: ...
+
+class GetSaleHistoryResponse(_message.Message):
+    __slots__ = ("lot",)
+    LOT_FIELD_NUMBER: _ClassVar[int]
+    lot: _containers.RepeatedCompositeFieldContainer[Lot]
+    def __init__(self, lot: _Optional[_Iterable[_Union[Lot, _Mapping]]] = ...) -> None: ...
+
+class GetLotByVinOrLotRequest(_message.Message):
+    __slots__ = ("vin_or_lot_id", "site")
+    VIN_OR_LOT_ID_FIELD_NUMBER: _ClassVar[int]
+    SITE_FIELD_NUMBER: _ClassVar[int]
+    vin_or_lot_id: str
+    site: str
+    def __init__(self, vin_or_lot_id: _Optional[str] = ..., site: _Optional[str] = ...) -> None: ...
+
+class GetLotByVinOrLotResponse(_message.Message):
+    __slots__ = ("lot",)
+    LOT_FIELD_NUMBER: _ClassVar[int]
+    lot: _containers.RepeatedCompositeFieldContainer[Lot]
+    def __init__(self, lot: _Optional[_Iterable[_Union[Lot, _Mapping]]] = ...) -> None: ...
+
+class GetCurrentBidRequest(_message.Message):
+    __slots__ = ("lot_id", "site")
+    LOT_ID_FIELD_NUMBER: _ClassVar[int]
+    SITE_FIELD_NUMBER: _ClassVar[int]
+    lot_id: int
+    site: str
+    def __init__(self, lot_id: _Optional[int] = ..., site: _Optional[str] = ...) -> None: ...
+
+class GetCurrentBidResponse(_message.Message):
+    __slots__ = ("current_bid",)
+    CURRENT_BID_FIELD_NUMBER: _ClassVar[int]
+    current_bid: CurrentBid
+    def __init__(self, current_bid: _Optional[_Union[CurrentBid, _Mapping]] = ...) -> None: ...
+
+class CurrentBid(_message.Message):
+    __slots__ = ("pre_bid",)
+    PRE_BID_FIELD_NUMBER: _ClassVar[int]
+    pre_bid: int
+    def __init__(self, pre_bid: _Optional[int] = ...) -> None: ...
 
 class Lot(_message.Message):
     __slots__ = ("lot_id", "site", "base_site", "salvage_id", "odometer", "price_new", "price_future", "price_reserve", "current_bid", "auction_date", "cost_priced", "cost_repair", "year", "cylinders", "state", "vehicle_type", "auction_type", "make", "model", "series", "damage_pr", "damage_sec", "keys", "odobrand", "fuel", "drive", "transmission", "color", "status", "title", "vin", "engine", "engine_size", "location", "location_old", "location_id", "country", "document", "document_old", "currency", "seller", "is_buynow", "iaai_360", "copart_exterior_360", "copart_interior_360", "video", "link_img_hd", "link_img_small", "is_offsite", "location_offsite", "link", "body_type", "seller_type", "vehicle_score", "form_get_type", "sale_history", "sale_date", "sale_status", "purchase_price")

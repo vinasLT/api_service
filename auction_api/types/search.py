@@ -2,10 +2,10 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict
 
+from auction_api.types.common import SiteIn, SiteEnum
 from auction_api.types.lot import BasicLot, BasicHistoryLot
-from auction_api.utils import AuctionApiUtils
 
 
 class BasicPaginationInfo(BaseModel):
@@ -19,14 +19,6 @@ class BasicManyCurrentLots(BasicPaginationInfo):
 
 class BasicManyHistoryLot(BasicPaginationInfo):
     data: list[BasicHistoryLot]
-
-
-class SiteEnum(str, Enum):
-    """Auction site enumeration"""
-    COPART = 'copart'
-    IAAI = 'iaai'
-    COPART_NUM = '1'
-    IAAI_NUM = '2'
 
 
 class SortEnum(str, Enum):
@@ -59,20 +51,11 @@ class SellerTypeEnum(str, Enum):
     DEALER = 'dealer'
 
 
-class SiteIn(BaseModel):
-    site: Optional[SiteEnum] = Field(..., description="Auction site 1 or 2 or copart or iaai")
-
-    @field_validator('site', mode='after')
-    @classmethod
-    def validate_site(cls, v):
-        if v is None:
-            return v
-        return SiteEnum(str(AuctionApiUtils.normalize_auction_to_num(v)))
 
 
-
-class CommonSearchParams(SiteIn):
+class CommonSearchParams(BaseModel):
     make: Optional[str] = Field(None, description="Vehicle make")
+    site: Optional[SiteEnum] = Field(None, description="Auction site")
     model: Optional[str] = Field(None, description="Vehicle model")
     vehicle_type: Optional[str] = Field(None, description="Vehicle type")
     year_from: Optional[int] = Field(None, ge=1900, le=2030, description="Year from")
