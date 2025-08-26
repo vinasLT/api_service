@@ -1,14 +1,20 @@
-FROM python:3.13-slim as base
+FROM python:3.13-slim
+
 
 # Установка зависимостей системы
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    wget \
     libpq-dev \
     pkg-config \
     postgresql-client \
   && rm -rf /var/lib/apt/lists/*
 
+# Установка grpc_health_probe
+RUN GRPC_HEALTH_PROBE_VERSION=v0.4.24 && \
+    wget -qO/bin/grpc_health_probe https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 && \
+    chmod +x /bin/grpc_health_probe
 
 # Установка Poetry через pip
 RUN pip install --no-cache-dir poetry
@@ -33,22 +39,6 @@ RUN poetry install --only main --no-root
 # Копирование исходного кода
 COPY . /app
 
-
-
-
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-## FastAPI target
-#FROM base as fastapi
-#EXPOSE 8000
-#HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-#  CMD curl -f http://localhost:8000/health || exit 1
-#CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
-#
-## gRPC target
-#FROM base as grpc
-#EXPOSE 50051
-#HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-#  CMD grpc_health_probe -addr=localhost:50051 || exit 1
-#CMD ["python", "rpc_server/serve_rpc.py"]
