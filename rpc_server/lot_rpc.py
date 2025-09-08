@@ -52,7 +52,7 @@ class LotRpc(lot_pb2_grpc.LotServiceServicer):
 
     @staticmethod
     def _parse_site_enum(site: str) -> Optional[SiteEnum]:
-        return SiteEnum(site) if site else None
+        return SiteEnum(site.lower()) if site else None
 
     def _create_lot_by_id_data(self, lot_id: int, site: str) -> LotByIDIn:
         site_enum = self._parse_site_enum(site)
