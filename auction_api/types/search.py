@@ -53,9 +53,8 @@ class SellerTypeEnum(str, Enum):
 
 
 
-class CommonSearchParams(BaseModel):
+class CommonSearchParams(SiteIn):
     make: Optional[str] = Field(None, description="Vehicle make")
-    site: Optional[SiteEnum] = Field(None, description="Auction site")
     model: Optional[str] = Field(None, description="Vehicle model")
     vehicle_type: Optional[str] = Field(None, description="Vehicle type")
     year_from: Optional[int] = Field(None, ge=1900, le=2030, description="Year from")
@@ -82,6 +81,8 @@ class CommonSearchParams(BaseModel):
     size: Optional[int] = Field(10, ge=1, le=30, description="Lots per page (max 30)")
 
     model_config = ConfigDict(use_enum_values=True)
+
+
 
 
 class CurrentSearchParams(CommonSearchParams):

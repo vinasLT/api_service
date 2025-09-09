@@ -9,10 +9,11 @@ class SiteEnum(str, Enum):
     COPART_NUM = '1'
     IAAI_NUM = '2'
 
+
 class SiteIn(BaseModel):
     site: Optional[SiteEnum] = Field(..., description="Auction site 1 or 2 or copart or iaai")
 
-    @field_validator('site', mode='after')
+    @field_validator('site', mode='before')
     @classmethod
     def validate_site(cls, v):
         from auction_api.utils import AuctionApiUtils
