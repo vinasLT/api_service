@@ -1,0 +1,35 @@
+id,name,slug
+1,All Over,all-over
+2,Biohazard/Chemical,biohazard-chemical
+3,Burn,burn
+4,Burn - Engine,burn-engine
+5,Burn - Interior,burn-interior
+6,Cash For Clunkers,cash-for-clunkers
+7,Damage History,damage-history
+8,Electrical,electrical
+9,Engine Damage,engine-damage
+10,Frame Damage,frame-damage
+11,Front End,front-end
+12,Front & Rear,front-rear
+13,Hail,hail
+14,Mechanical,mechanical
+15,Minor Dent/Scratches,minor-dent-scratches
+16,Missing/Altered VIN,missing-altered-vin
+17,Normal Wear,normal-wear
+18,Partial Repair,partial-repair
+19,Rear End,rear-end
+20,Rejected Repair,rejected-repair
+21,Replaced VIN,replaced-vin
+22,Repossession,repossession
+23,Rollover,rollover
+24,Side,side
+25,Storm Damage,storm-damage
+26,Stripped,stripped
+27,Suspension,suspension
+28,Theft,theft
+29,Transmission Damage,transmission-damage
+30,Vandalized,vandalized
+31,Top/Roof,top-roof
+32,Undercarriage,undercarriage
+33,Unknown,unknown
+34,Water/Flood,water-flood

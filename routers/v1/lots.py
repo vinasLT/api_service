@@ -1,15 +1,18 @@
 from fastapi import APIRouter, Query, Depends
 from fastapi_cache import default_key_builder
 from fastapi_cache.decorator import cache
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from auction_api.api import AuctionApiClient
 from auction_api.types.lot import BasicLot, BasicHistoryLot
 from auction_api.types.search import BasicManyCurrentLots, CurrentSearchParams
 from auction_api.utils import get_lot_vin_or_lot_id
 from core.logger import logger
+from database.db.session import get_async_db
 from dependencies.auction_api_service import get_auction_api_service
 from request_schemas.lot import LotByIDIn, LotByVINIn, CurrentBidOut
 from schemas.vin_or_lot import VinOrLotIn
+from services.transform_slugs import transform_slugs
 
 cars_router = APIRouter()
 
@@ -39,8 +42,10 @@ async def get_current_bid(data: LotByIDIn = Query(),
 @cars_router.get("", response_model=BasicManyCurrentLots)
 @cache(expire=60*60, key_builder=default_key_builder)
 async def get_current_lots(api: AuctionApiClient = Depends(get_auction_api_service),
+                           db: AsyncSession = Depends(get_async_db),
                            search_params: CurrentSearchParams = Query(...)):
-    logger.debug('New request to get many current lots', extra={'data': search_params.model_dump()})
+    data = await transform_slugs(search_params, db)
+    logger.debug('New request to get many current lots', extra={'data': data.model_dump()})
     return await api.request_with_schema(api.GET_CURRENT_LOTS, search_params)
 
 

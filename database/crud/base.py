@@ -1,4 +1,6 @@
 from typing import TypeVar, Generic, Type, Optional, Sequence
+
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from pydantic import BaseModel
 
@@ -10,7 +12,7 @@ UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
 
 
 class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
-    def __init__(self, model: Type[ModelType], session: AsyncSessionLocal = None):
+    def __init__(self, model: Type[ModelType], session: AsyncSession = None):
         self.model = model
         self.session = session
 
@@ -20,6 +22,15 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     async def get_all(self) -> Sequence[ModelType]:
         result = await self.session.execute(select(self.model))
         return result.scalars().all()
+
+    async def get_by_field(self, field_name: str, value):
+        field = getattr(self.model, field_name, None)
+        if field is None:
+            raise AttributeError(f"Model {self.model.__name__} has no field '{field_name}'")
+        result = await self.session.execute(
+            select(self.model).where(field == value).limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def create(self, data: CreateSchemaType, flush: bool = False) -> ModelType:
         obj = self.model(**data.model_dump())

@@ -4,7 +4,7 @@ from typing import List, TYPE_CHECKING
 from pydantic import BaseModel
 from rfc9457 import BadRequestProblem, NotFoundProblem
 
-from core.logger import logger
+from core.logger import logger, log_async_execution_time
 from .types import BaseClientIn
 import httpx
 
@@ -39,6 +39,7 @@ class BaseClient(ABC):
             })
             raise BadRequestProblem(detail='Request to API Failed') from e
 
+    @log_async_execution_time('Request to external API')
     async def request_with_schema(self, schema: "EndpointSchema", data: BaseModel, **kwargs) -> BaseModel | List[BaseModel]:
         url = self._build_url(schema.endpoint.format(**kwargs))
 
