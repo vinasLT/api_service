@@ -1,17 +1,16 @@
 import sys
 from pathlib import Path
 
+CURRENT_FILE = Path(__file__).resolve()
+PROJECT_ROOT = CURRENT_FILE.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import pandas as pd
 from sqlalchemy import Engine, text
 
 from core.logger import logger
 from database.db.session import engine
-
-# Ensure project root is on sys.path so that 'app' package can be imported
-CURRENT_FILE = Path(__file__).resolve()
-PROJECT_ROOT = CURRENT_FILE.parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 
