@@ -55,20 +55,19 @@ async def seed_vehicle_data(engine: Engine):
 
     # Deletion order: children first, then parents (to satisfy FKs)
     delete_order = [
-        'vehicle_type',
-        'make',
         'model',
+        'make',
+        'vehicle_type',
         'transmission',
         'drive',
         'status',
         'document',
         'damage',
-
-
     ]
 
     # Insertion order: parents first, then children
     insert_order = [
+        'vehicle_type',
         'make',
         'damage',
         'document',
@@ -76,7 +75,6 @@ async def seed_vehicle_data(engine: Engine):
         'drive',
         'transmission',
         'model',
-        'vehicle_type',
     ]
 
     # Phase 1: delete existing data without dropping tables (preserve schema & FKs)
