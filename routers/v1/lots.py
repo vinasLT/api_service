@@ -26,8 +26,6 @@ async def get_by_lot_id_or_vin(
     logger.debug('New request to get lot by vin or lot', extra={'data': data.model_dump()})
 
     vin_or_lot = data.vin_or_lot.replace(" ", "").upper()
-    print(vin_or_lot)
-    print(data.site)
 
     return await get_lot_vin_or_lot_id(api, data.site, vin_or_lot)
 

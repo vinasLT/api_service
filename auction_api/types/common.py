@@ -2,8 +2,13 @@ from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
+class DefinedSiteEnum(str, Enum):
+    COPART = 'copart'
+    IAAI = 'iaai'
+    COPART_NUM = '1'
+    IAAI_NUM = '2'
+
 class SiteEnum(str, Enum):
-    """Auction site enumeration"""
     COPART = 'copart'
     IAAI = 'iaai'
     COPART_NUM = '1'
