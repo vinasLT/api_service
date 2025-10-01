@@ -8,6 +8,8 @@ class SiteEnum(str, Enum):
     IAAI = 'iaai'
     COPART_NUM = '1'
     IAAI_NUM = '2'
+    ALL = 'all'
+    ALL_NUM = '3'
 
 
 class SiteIn(BaseModel):

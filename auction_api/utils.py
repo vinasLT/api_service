@@ -15,7 +15,8 @@ if TYPE_CHECKING:
 class AuctionApiUtils:
     AUCTION_NUM = {
         'copart': 1,
-        'iaai': 2
+        'iaai': 2,
+        'all': 3
     }
 
     @classmethod

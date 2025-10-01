@@ -4,6 +4,7 @@ from typing import List, TYPE_CHECKING
 from pydantic import BaseModel
 from rfc9457 import BadRequestProblem, NotFoundProblem
 
+from auction_api.types.common import SiteEnum
 from core.logger import logger, log_async_execution_time
 from .types import BaseClientIn
 import httpx
@@ -44,6 +45,14 @@ class BaseClient(ABC):
         url = self._build_url(schema.endpoint.format(**kwargs))
 
         payload = data.model_dump(exclude_none=True, mode='json')
+
+
+        site_val = payload.get('site')
+        if site_val is not None:
+            normalized = str(site_val).lower()
+            if normalized in {SiteEnum.ALL_NUM, SiteEnum.ALL}:
+                payload['site'] = [1, 2]
+
         logger.debug(f"Request payload: {payload}, url: {url}, data: {data}")
 
         if schema.method == "GET":

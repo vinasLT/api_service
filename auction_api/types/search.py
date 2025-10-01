@@ -74,8 +74,8 @@ class CommonSearchParams(SiteIn):
     odometer_min: Optional[int] = Field(None, ge=0, description="Minimum odometer")
     odometer_max: Optional[int] = Field(None, ge=0, description="Maximum odometer")
     seller_type: Optional[SellerTypeEnum] = Field(None, description="Seller type")
-    sort: Optional[SortEnum] = Field(None, description="Sort field")
-    direction: Optional[DirectionEnum] = Field(None, description="Sort direction")
+    sort: Optional[SortEnum] = Field(SortEnum.AUCTION_DATE, description="Sort field")
+    direction: Optional[DirectionEnum] = Field(DirectionEnum.DESC, description="Sort direction")
 
     page: Optional[int] = Field(1, ge=1, description="Page number")
     size: Optional[int] = Field(10, ge=1, le=30, description="Lots per page (max 30)")
