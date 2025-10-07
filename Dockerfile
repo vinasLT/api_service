@@ -21,7 +21,8 @@ RUN pip install --no-cache-dir poetry
 
 # Настройки Poetry
 ENV POETRY_VIRTUALENVS_CREATE=false \
-    POETRY_NO_INTERACTION=1
+    POETRY_NO_INTERACTION=1 \
+    PYTHONUNBUFFERED=1
 
 # Создание рабочей директории
 WORKDIR /app
