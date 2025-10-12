@@ -1,5 +1,5 @@
 from abc import abstractmethod, ABC
-from typing import List, TYPE_CHECKING
+from typing import List, TYPE_CHECKING, Type, TypeVar
 
 from pydantic import BaseModel
 from rfc9457 import BadRequestProblem, NotFoundProblem
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from auction_api.api import EndpointSchema
 
 
-
+T = TypeVar("T", bound=BaseModel)
 
 class BaseClient(ABC):
     def __init__(self, data: BaseClientIn):
@@ -41,7 +41,7 @@ class BaseClient(ABC):
             raise BadRequestProblem(detail='Request to API Failed') from e
 
     @log_async_execution_time('Request to external API')
-    async def request_with_schema(self, schema: "EndpointSchema", data: BaseModel, **kwargs) -> BaseModel | List[BaseModel]:
+    async def request_with_schema(self, schema: "EndpointSchema", data: BaseModel, **kwargs) -> Type[T]:
         url = self._build_url(schema.endpoint.format(**kwargs))
 
         payload = data.model_dump(exclude_none=True, mode='json')
@@ -79,7 +79,7 @@ class BaseClient(ABC):
         return self.process_response(response_data, schema)
 
     @abstractmethod
-    def process_response(self, response_data: dict | list, schema: "EndpointSchema") -> BaseModel | List[BaseModel]:
+    def process_response(self, response_data: dict | list, schema: "EndpointSchema") -> Type[T]:
         ...
 
 

@@ -81,17 +81,17 @@ class BasicLot(BaseModel):
 
 
 class SaleHistoryItem(BaseModel):
-    lot_id: Optional[int] = None
-    site: Optional[int] = None
-    base_site: Optional[str] = None
-    vin: Optional[str] = None
-    sale_status: Optional[str] = None
-    sale_date: Optional[datetime] = None
-    purchase_price: Optional[int] = None
-    is_buynow: Optional[bool] = None
-    buyer_state: Optional[str] = None
-    buyer_country: Optional[str] = None
-    vehicle_type: Optional[str] = None
+    lot_id: int | None = None
+    site: int | None = None
+    base_site: str | None = None
+    vin: str | None = None
+    sale_status: str | None = None
+    sale_date: datetime | None = None
+    purchase_price: int | None = None
+    is_buynow: bool | None = None
+    buyer_state: str | None = None
+    buyer_country: str | None = None
+    vehicle_type: str | None = None
 
     @model_validator(mode="before")
     @classmethod
