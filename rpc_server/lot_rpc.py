@@ -6,7 +6,8 @@ import redis.asyncio as redis
 from rfc9457 import NotFoundProblem
 
 from auction_api.api import AuctionApiClient
-from auction_api.types.search import SiteEnum
+from auction_api.types.common import SiteEnum
+
 from auction_api.utils import get_lot_vin_or_lot_id
 from config import settings
 from core.logger import logger
@@ -51,7 +52,7 @@ class LotRpc(lot_pb2_grpc.LotServiceServicer):
             self.cache = None
 
     @staticmethod
-    def _parse_site_enum(site: str) -> Optional[SiteEnum]:
+    def _parse_site_enum(site: str) -> SiteEnum | None:
         return SiteEnum(site.lower()) if site else None
 
     def _create_lot_by_id_data(self, lot_id: int, site: str) -> LotByIDIn:
