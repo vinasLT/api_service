@@ -20,7 +20,7 @@ cars_router = APIRouter()
 
 @cars_router.get("/vin-or-lot-id", response_model=list[BasicLot] | list[BasicHistoryLot] | BasicLot | BasicHistoryLot,
                  description='Get lot by vin or lot id')
-@cache(expire=60*30, key_builder=default_key_builder)
+# @cache(expire=60*30, key_builder=default_key_builder)
 async def get_by_lot_id_or_vin(
     data: VinOrLotIn = Query(...),
     api: AuctionApiClient = Depends(get_auction_api_service),

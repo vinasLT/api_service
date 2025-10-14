@@ -1,10 +1,12 @@
-from datetime import datetime
+from datetime import datetime, UTC
 from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field, HttpUrl, model_validator
+from requests.compat import has_simplejson
 
 from auction_api.utils import AuctionApiUtils
+from core.logger import logger
 
 
 class FormGetType(str, Enum):
@@ -72,11 +74,20 @@ class BasicLot(BaseModel):
     @model_validator(mode='after')
     @classmethod
     def validate_together(cls, data):
-        if hasattr(data, 'sale_date'):
+        try:
+            auction_date = data.auction_date
+            if auction_date:
+                now = datetime.now(UTC)
+                if auction_date > now:
+                    data.form_get_type = FormGetType.ACTIVE
+                else:
+                    data.form_get_type = FormGetType.HISTORY
+            else:
+                if hasattr(data, 'sale_date'):
+                    data.form_get_type = FormGetType.HISTORY
+        except Exception as e:
+            logger.exception(f'Failed to parse auction_date: {e}')
             data.form_get_type = FormGetType.HISTORY
-        else:
-            data.form_get_type = FormGetType.ACTIVE
-
         return data
 
 
