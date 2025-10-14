@@ -50,9 +50,7 @@ class SellerTypeEnum(str, Enum):
     DEALER = 'dealer'
 
 
-def time_now() -> str:
-    now =  datetime.now()
-    return now.strftime("%Y-%m-%d")
+
 
 class CommonSearchParams(SiteIn):
     make: str | None = Field(None, description="Vehicle make")
@@ -60,7 +58,7 @@ class CommonSearchParams(SiteIn):
     vehicle_type: str | None = Field(None, description="Vehicle type")
     year_from: int | None = Field(None, ge=1900, le=2030, description="Year from")
     year_to: int | None = Field(None, ge=1900, le=2030, description="Year to")
-    auction_date_from: datetime | None = Field(default_factory=time_now, description="Auction date from, '2025-08-18'",
+    auction_date_from: datetime | None = Field(default=None, description="Auction date from, '2025-08-18'",
                                                examples=['2025-08-18'])
     auction_date_to: datetime | None = Field(None, description="Auction date to, '2025-08-18'",
                                              examples=['2025-08-18'])
@@ -76,7 +74,7 @@ class CommonSearchParams(SiteIn):
     odometer_max: int | None = Field(None, ge=0, description="Maximum odometer")
     seller_type: SellerTypeEnum | None = Field(None, description="Seller type")
     sort: SortEnum | None = Field(SortEnum.AUCTION_DATE, description="Sort field")
-    direction: DirectionEnum | None = Field(DirectionEnum.DESC, description="Sort direction")
+    direction: DirectionEnum | None = Field(DirectionEnum.ASC, description="Sort direction")
 
     page: int | None = Field(1, ge=1, description="Page number")
     size: int | None = Field(10, ge=1, le=30, description="Lots per page (max 30)")

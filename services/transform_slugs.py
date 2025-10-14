@@ -48,7 +48,7 @@ async def transform_slugs(
                 obj = await service.get_by_field('slug', value)
                 transformed.append(obj.name if obj else value)
             except Exception as e:
-                logger.warning(f"Error while transforming slugs for {field_name}", exception=e.__str__())
+                logger.exception(f"Error while transforming slugs for {field_name}", exception=e.__str__())
                 transformed.append(value)
 
         setattr(data, field_name, transformed if is_list else transformed[0])

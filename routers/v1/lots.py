@@ -1,3 +1,5 @@
+from datetime import datetime, UTC
+
 from fastapi import APIRouter, Query, Depends
 from fastapi_cache import default_key_builder
 from fastapi_cache.decorator import cache
@@ -42,6 +44,8 @@ async def get_current_bid(data: LotByIDIn = Query(),
 async def get_current_lots(api: AuctionApiClient = Depends(get_auction_api_service),
                            db: AsyncSession = Depends(get_async_db),
                            search_params: CurrentSearchParams = Query(...)):
+    if not search_params.auction_date_from:
+        search_params.auction_date_from = datetime.now(UTC)
     data = await transform_slugs(search_params, db)
     logger.debug('New request to get many current lots', extra={'data': data.model_dump(mode='json')})
     return await api.request_with_schema(api.GET_CURRENT_LOTS, search_params)
