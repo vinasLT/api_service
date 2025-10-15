@@ -1,22 +1,15 @@
-from typing import Union, Optional
+from pydantic import Field
 
-from pydantic import BaseModel, field_validator
+from auction_api.types.common import DefinedSiteEnum
+from request_schemas.lot import SiteIn
 
-from auction_api.utils import AuctionApiUtils
 
-
-class VinOrLotIn(BaseModel):
-    site: Optional[Union[int, str]]
+class VinOrLotIn(SiteIn):
+    site: DefinedSiteEnum | None = Field(None, description="Auction of vehicle")
     vin_or_lot: str
 
-    @field_validator('site', mode='before')
     @classmethod
-    def validate_site(cls, v) -> Optional[int]:
-        """
-        При пустом значении просто возвращаем None,
-        иначе нормализуем через вспомогательную функцию.
-        """
-        if v is None or (isinstance(v, str) and v.strip() == ""):
-            return None
-        return AuctionApiUtils.normalize_auction_to_num(v)
+    def validate_site(cls, v):
+        return v
+
 

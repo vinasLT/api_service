@@ -1,15 +1,22 @@
-import re
-from typing import Union
+from datetime import datetime
+from typing import Union, TYPE_CHECKING
 
-from pydantic import BaseModel
+from pydantic_core import PydanticCustomError
+from rfc9457 import NotFoundProblem
 
-from exptions import BadRequestException
+from core.logger import logger
+from request_schemas.lot import LotByIDIn, LotByVINIn
+
+if TYPE_CHECKING:
+    from auction_api.api import AuctionApiClient
+    from auction_api.types.search import SiteEnum
 
 
 class AuctionApiUtils:
     AUCTION_NUM = {
         'copart': 1,
-        'iaai': 2
+        'iaai': 2,
+        'all': 3
     }
 
     @classmethod
@@ -17,13 +24,13 @@ class AuctionApiUtils:
         for key, value in cls.AUCTION_NUM.items():
             if num == value:
                 return key
-        raise BadRequestException('Wrong auction number', 'wrong_auction_number')
+        raise PydanticCustomError('wrong_auction_number', 'Wrong auction number')
 
     @classmethod
     def auction_name_to_num(cls, auction_name: str) -> int:
         num = cls.AUCTION_NUM.get(auction_name.lower())
         if num is None:
-            raise BadRequestException('Wrong auction name', 'wrong_auction_name')
+            raise PydanticCustomError( 'wrong_auction_name', 'Wrong auction name')
         return num
 
     @classmethod
@@ -36,22 +43,23 @@ class AuctionApiUtils:
             return auction
         elif auction.isdigit():
             return int(auction)
-        raise BadRequestException('Wrong auction', 'wrong_auction')
+        raise PydanticCustomError('wrong_auction', 'Wrong auction')
 
-    @staticmethod
-    def set_value_in_path(endpoint: str, data: BaseModel) -> str:
-        placeholders = re.findall(r'{(\w+)}', endpoint)
-        if not placeholders:
-            return endpoint
-
-        data_dict = data.model_dump()
-
-        for key in placeholders:
-            if key in data_dict:
-                endpoint = endpoint.replace(f'{{{key}}}', str(data_dict[key]))
-            else:
-                raise ValueError(f"Field '{key}' not found in model")
-
-        return endpoint
-
+async def get_lot_vin_or_lot_id(api: "AuctionApiClient", site: "SiteEnum", vin_or_lot_id: str):
+    vin_or_lot = vin_or_lot_id.replace(" ", "").upper()
+    if vin_or_lot.isdigit():
+        try:
+            logger.debug(f'Request routed to get by lot_id - {vin_or_lot}', extra={'site': site, 'vin_or_lot_id': vin_or_lot})
+            in_data = LotByIDIn(site=site, lot_id=int(vin_or_lot))
+            response = await api.request_with_schema(api.GET_LOT_BY_ID_FOR_ALL_TIME, in_data, lot_id=vin_or_lot)
+        except NotFoundProblem:
+            response = None
+    else:
+        logger.debug(f'Request routed to get by vin - {vin_or_lot}',  extra={'site': site, 'vin_or_lot_id': vin_or_lot})
+        in_data = LotByVINIn(vin=vin_or_lot, site=site)
+        response = await api.request_with_schema(api.GET_LOT_BY_VIN_FOR_ALL_TIME, in_data)
+    if not response:
+        in_data = LotByIDIn(site=site, lot_id=int(vin_or_lot))
+        response = await api.request_with_schema(api.GET_LOT_BY_ID_FOR_CURRENT, in_data, lot_id=vin_or_lot)
+    return response
 

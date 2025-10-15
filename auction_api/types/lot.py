@@ -1,18 +1,17 @@
-from datetime import datetime
-from typing import Type, Literal, Optional, List, Union
+from datetime import datetime, UTC
+from enum import Enum
+from typing import Optional
 
-from pydantic import BaseModel, PositiveInt, HttpUrl, field_validator, Field, model_validator
+from pydantic import BaseModel, Field, HttpUrl, model_validator
+from requests.compat import has_simplejson
 
 from auction_api.utils import AuctionApiUtils
+from core.logger import logger
 
 
-class EndpointSchema(BaseModel):
-    validation_schema: Type[BaseModel]
-    method: str = Literal['GET', 'POST']
-    endpoint: str
-    out_schema_default: Type[BaseModel]
-    out_schema_history: Optional[Type[BaseModel]] = None
-    is_list: bool = False
+class FormGetType(str, Enum):
+    HISTORY = 'history'
+    ACTIVE = 'active'
 
 
 class BasicLot(BaseModel):
@@ -23,7 +22,7 @@ class BasicLot(BaseModel):
     odometer: Optional[int] = None
     price_new: Optional[int] = None
     price_future: Optional[int] = None
-    reserve_price: Optional[int] = None
+    price_reserve: Optional[int] = None
     current_bid: Optional[int] = None
     auction_date: Optional[datetime] = None
     cost_priced: Optional[int] = None
@@ -59,32 +58,51 @@ class BasicLot(BaseModel):
     seller: Optional[str] = None
     is_buynow: Optional[bool] = None
     iaai_360: Optional[str] = None
-    copart_exterior_360: Optional[List[str]] = None
+    copart_exterior_360: Optional[list[str]] = None
     copart_interior_360: Optional[str] = None
     video: Optional[str] = None
-    link_img_hd: Optional[List[HttpUrl]] = None
-    link_img_small: Optional[List[HttpUrl]] = None
+    link_img_hd: Optional[list[HttpUrl]] = None
+    link_img_small: Optional[list[HttpUrl]] = None
     is_offsite: Optional[bool] = None
     location_offsite: Optional[str] = None
     link: Optional[HttpUrl] = None
     body_type: Optional[str] = None
     seller_type: Optional[str] = None
     vehicle_score: Optional[str] = None
-    form_get_type: str = Field(default='history')
+    form_get_type: FormGetType = Field(default=FormGetType.HISTORY)
+
+    @model_validator(mode='after')
+    @classmethod
+    def validate_together(cls, data):
+        try:
+            auction_date = data.auction_date
+            if auction_date:
+                now = datetime.now(UTC)
+                if auction_date > now:
+                    data.form_get_type = FormGetType.ACTIVE
+                else:
+                    data.form_get_type = FormGetType.HISTORY
+            else:
+                if hasattr(data, 'sale_date'):
+                    data.form_get_type = FormGetType.HISTORY
+        except Exception as e:
+            logger.exception(f'Failed to parse auction_date: {e}')
+            data.form_get_type = FormGetType.HISTORY
+        return data
 
 
 class SaleHistoryItem(BaseModel):
-    lot_id: Optional[int] = None
-    site: Optional[int] = None
-    base_site: Optional[str] = None
-    vin: Optional[str] = None
-    sale_status: Optional[str] = None
-    sale_date: Optional[datetime] = None
-    purchase_price: Optional[int] = None
-    is_buynow: Optional[bool] = None
-    buyer_state: Optional[str] = None
-    buyer_country: Optional[str] = None
-    vehicle_type: Optional[str] = None
+    lot_id: int | None = None
+    site: int | None = None
+    base_site: str | None = None
+    vin: str | None = None
+    sale_status: str | None = None
+    sale_date: datetime | None = None
+    purchase_price: int | None = None
+    is_buynow: bool | None = None
+    buyer_state: str | None = None
+    buyer_country: str | None = None
+    vehicle_type: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -100,24 +118,7 @@ class SaleHistoryItem(BaseModel):
 
 
 class BasicHistoryLot(BasicLot):
-    sale_history: Optional[List[SaleHistoryItem]] = None
+    sale_history: Optional[list[SaleHistoryItem]] = None
     sale_date: Optional[datetime] = None
     sale_status: Optional[str] = None
     purchase_price: Optional[int] = None
-
-
-class LotByIDIn(BaseModel):
-    lot_id: PositiveInt
-    site: Optional[Union[int, str]]
-
-    @field_validator('site')
-    @classmethod
-    def validate_site(cls, v)-> int:
-        return AuctionApiUtils.normalize_auction_to_num(v)
-
-class LotByVINIn(BaseModel):
-    vin: str
-    site: Optional[Union[int, str]]
-
-class CurrentBidOut(BaseModel):
-    pre_bid: PositiveInt

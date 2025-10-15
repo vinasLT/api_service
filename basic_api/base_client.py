@@ -1,25 +1,21 @@
-import logging
-from abc import abstractmethod
-from typing import List
+from abc import abstractmethod, ABC
+from typing import List, TYPE_CHECKING, Type, TypeVar
 
 from pydantic import BaseModel
-from auction_api import EndpointSchema
-from auction_api.utils import AuctionApiUtils
-from exptions import BadRequestException
+from rfc9457 import BadRequestProblem, NotFoundProblem
+
+from auction_api.types.common import SiteEnum
+from core.logger import logger, log_async_execution_time
 from .types import BaseClientIn
 import httpx
 
-# Настройка логгера
-logger = logging.getLogger("auction_api.client")
-logger.setLevel(logging.INFO)  # Можно заменить на DEBUG для подробного логгирования
-
-handler = logging.StreamHandler()
-formatter = logging.Formatter('[%(asctime)s] %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
+if TYPE_CHECKING:
+    from auction_api.api import EndpointSchema
 
 
-class BaseClient:
+T = TypeVar("T", bound=BaseModel)
+
+class BaseClient(ABC):
     def __init__(self, data: BaseClientIn):
         self.api_key = data.api_key
         self.header_name = data.header_name
@@ -30,44 +26,62 @@ class BaseClient:
 
     async def _make_request(self, method: str, url: str, **kwargs) -> httpx.Response:
         headers = {self.header_name: self.api_key}
-        logger.info(f"📤 Sending {method} request to {url}")
-        logger.debug(f"Headers: {headers}")
-        logger.debug(f"Request kwargs: {kwargs}")
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                return await client.request(method, url, headers=headers, **kwargs)
+        except httpx.HTTPError as e:
+            logger.error(f"Request to API Failed", exc_info=e, extra={
+                'data': {
+                    'url': url,
+                    'headers': headers,
+                    'kwargs': kwargs,
+                    'error': e
+                }
+            })
+            raise BadRequestProblem(detail='Request to API Failed') from e
 
-        async with httpx.AsyncClient() as client:
-            response = await client.request(method, url, headers=headers, **kwargs)
+    @log_async_execution_time('Request to external API')
+    async def request_with_schema(self, schema: "EndpointSchema", data: BaseModel, **kwargs) -> Type[T]:
+        url = self._build_url(schema.endpoint.format(**kwargs))
 
-        logger.info(f"📥 Received response with status {response.status_code} from {url}")
-        if response.status_code != httpx.codes.OK:
-            logger.warning(f"⚠️ Response body: {response.text}")
-        return response
+        payload = data.model_dump(exclude_none=True, mode='json')
 
-    async def request_with_schema(self, schema: EndpointSchema, data: BaseModel) -> BaseModel | List[BaseModel]:
-        url = self._build_url(AuctionApiUtils.set_value_in_path(schema.endpoint, data))
-        payload = data.model_dump(exclude_none=True)
 
-        logger.info(f"🔁 Performing request for schema: {schema}")
-        logger.debug(f"Payload: {payload}")
+        site_val = payload.get('site')
+        if site_val is not None:
+            normalized = str(site_val).lower()
+            if normalized in {SiteEnum.ALL_NUM, SiteEnum.ALL}:
+                payload['site'] = [1, 2]
+
+        logger.debug(f"Request payload: {payload}, url: {url}, data: {data}")
 
         if schema.method == "GET":
             response = await self._make_request("GET", url, params=payload)
+            logger.debug(f"Response: {response.json()}, len: {len(response.json())}")
         elif schema.method == "POST":
             response = await self._make_request("POST", url, json=payload)
         else:
+            logger.error(f"Unsupported method: {schema.method}")
             raise ValueError(f"Unsupported method: {schema.method}")
 
-        try:
-            response_data = response.json()
-        except Exception as e:
-            logger.error(f"❌ Failed to parse JSON response: {e}")
-            raise BadRequestException("Invalid response format", "bad_format")
-
         if response.status_code != httpx.codes.OK:
-            raise BadRequestException("Lot not found", "not_found")
+            logger.warning(f"Request failed, lot not found or smth", extra={
+                'data': {
+                    'url': url,
+                    'payload': payload,
+                    'response': response.json() if response.content else None
+                }
+            })
+            raise NotFoundProblem('Lot not found')
 
-        logger.debug(f"✅ Processed response data: {response_data}")
+        response_data = response.json()
+
         return self.process_response(response_data, schema)
 
     @abstractmethod
-    def process_response(self, response_data: dict | list, schema: EndpointSchema) -> BaseModel | List[BaseModel]:
+    def process_response(self, response_data: dict | list, schema: "EndpointSchema") -> Type[T]:
         ...
+
+
+
+
