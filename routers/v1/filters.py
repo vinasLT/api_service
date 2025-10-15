@@ -31,12 +31,12 @@ async def filters(
     vehicle_type_service = VehicleTypeService(db)
 
     return AllFiltersOut(
-        damage=[FilterRead.model_validate(filter_obj) for filter_obj in await damage_service.get_all()],
-        document=[FilterRead.model_validate(filter_obj) for filter_obj in await document_service.get_all()],
-        drive=[FilterRead.model_validate(filter_obj) for filter_obj in await drive_service.get_all()],
-        status=[FilterRead.model_validate(filter_obj) for filter_obj in await status_service.get_all()],
-        transmission=[FilterRead.model_validate(filter_obj) for filter_obj in await transmission_service.get_all()],
-        vehicle_type=[FilterRead.model_validate(filter_obj) for filter_obj in await vehicle_type_service.get_all()],
+        damage=[FilterRead.model_validate(filter_obj) for filter_obj in await damage_service.get_all_sorted('name')],
+        document=[FilterRead.model_validate(filter_obj) for filter_obj in await document_service.get_all_sorted('name')],
+        drive=[FilterRead.model_validate(filter_obj) for filter_obj in await drive_service.get_all_sorted('name')],
+        status=[FilterRead.model_validate(filter_obj) for filter_obj in await status_service.get_all_sorted('name')],
+        transmission=[FilterRead.model_validate(filter_obj) for filter_obj in await transmission_service.get_all_sorted('name')],
+        vehicle_type=[FilterRead.model_validate(filter_obj) for filter_obj in await vehicle_type_service.get_all_sorted('name')],
     )
 
 @filters_router.get("/{vehicle_type_slug}/makes", description='Get all static filters', response_model=list[FilterRead])

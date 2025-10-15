@@ -60,7 +60,7 @@ app.include_router(health_router, tags=["Health"])
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="localhost", port=8000)
+    uvicorn.run(app, host="localhost", port=8001)
 
 
 

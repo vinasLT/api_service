@@ -15,7 +15,7 @@ class MakeService(BaseService[Make, FilterCreate, FilterUpdate]):
 
     async def get_makes_by_vehicle_type(self, vehicle_type: VehicleType) -> Sequence[Make]:
         result = await self.session.execute(
-            select(Make).where(Make.vehicle_type_id == vehicle_type.id)
+            select(Make).where(Make.vehicle_type_id == vehicle_type.id).order_by(Make.name.asc())
         )
         return result.scalars().all()
 

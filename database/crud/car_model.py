@@ -15,6 +15,6 @@ class ModelService(BaseService[Model, FilterCreate, FilterUpdate]):
 
     async def get_by_make(self, make: Make) -> Sequence[Model]:
         result = await self.session.execute(
-            select(Model).where(Model.make_id == make.id)
+            select(Model).where(Model.make_id == make.id).order_by(Model.name.asc())
         )
         return result.scalars().all()

@@ -19,6 +19,18 @@ class BaseService(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     async def get(self, obj_id: int) -> Optional[ModelType]:
         return await self.session.get(self.model, obj_id)
 
+    async def get_all_sorted(self, sort_by: str, sort_order: str = "asc" ) -> Sequence[ModelType]:
+        sort_order = sort_order.lower()
+        if sort_order not in ("asc", "desc"):
+            raise ValueError("sort_order must be either 'asc' or 'desc'")
+        sort_field = getattr(self.model, sort_by, None)
+        if sort_field is None:
+            raise AttributeError(f"Model {self.model.__name__} has no field '{sort_by}'")
+        result = await self.session.execute(
+            select(self.model).order_by(sort_field.desc() if sort_order == "desc" else sort_field.asc())
+        )
+        return result.scalars().all()
+
     async def get_all(self) -> Sequence[ModelType]:
         result = await self.session.execute(select(self.model))
         return result.scalars().all()
