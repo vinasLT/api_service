@@ -51,6 +51,7 @@ async def seed_vehicle_data(engine: Engine):
         'status': src_dir / 'status.csv',
         'transmission': src_dir / 'transmissions.csv',
         'vehicle_type': src_dir / 'vehicle_type.csv',
+        'title_indicators': src_dir / 'title_indicators.csv',
     }
 
     # Deletion order: children first, then parents (to satisfy FKs)
@@ -63,6 +64,7 @@ async def seed_vehicle_data(engine: Engine):
         'status',
         'document',
         'damage',
+        'title_indicators'
     ]
 
     # Insertion order: parents first, then children
@@ -75,6 +77,7 @@ async def seed_vehicle_data(engine: Engine):
         'drive',
         'transmission',
         'model',
+        'title_indicators'
     ]
 
     # Phase 1: delete existing data without dropping tables (preserve schema & FKs)

@@ -7,3 +7,4 @@ from .document import Document
 from .status import Status
 from .damage import Damage
 from .transmission import Transmission
+from .title_indicators import TitleIndicators
