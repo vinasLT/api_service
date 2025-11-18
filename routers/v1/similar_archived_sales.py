@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Query, Depends
 
 from auction_api.api import AuctionApiClient
-from auction_api.types.lot import BasicHistoryLot
 from auction_api.types.search import HistorySearchParams, BasicManyCurrentLots
 from core.logger import logger
 from dependencies.auction_api_service import get_auction_api_service
