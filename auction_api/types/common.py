@@ -16,6 +16,9 @@ class SiteEnum(str, Enum):
     ALL = 'all'
     ALL_NUM = '3'
 
+class SimpleSiteEnum(str, Enum):
+    COPART = 'copart'
+    IAAI = 'iaai'
 
 class SiteIn(BaseModel):
     site: Optional[SiteEnum] = Field(..., description="Auction site 1 or 2 or copart or iaai")
