@@ -1,5 +1,5 @@
 from abc import abstractmethod, ABC
-from typing import List, TYPE_CHECKING, Type, TypeVar
+from typing import List, TYPE_CHECKING, Type, TypeVar, Any
 
 from pydantic import BaseModel
 from rfc9457 import BadRequestProblem, NotFoundProblem
@@ -57,24 +57,45 @@ class BaseClient(ABC):
 
         if schema.method == "GET":
             response = await self._make_request("GET", url, params=payload)
-            logger.debug(f"Response: {response.json()}, len: {len(response.json())}")
         elif schema.method == "POST":
             response = await self._make_request("POST", url, json=payload)
         else:
             logger.error(f"Unsupported method: {schema.method}")
             raise ValueError(f"Unsupported method: {schema.method}")
 
+        response_data = self._safe_json(response)
+        logger.debug(
+            "Response received",
+            extra={
+                "data": {
+                    "status_code": response.status_code,
+                    "url": url,
+                    "has_json": response_data is not None,
+                    "content_length": len(response.content or b""),
+                }
+            },
+        )
+
         if response.status_code != httpx.codes.OK:
             logger.warning(f"Request failed, lot not found or smth", extra={
                 'data': {
                     'url': url,
                     'payload': payload,
-                    'response': response.json() if response.content else None
+                    'response': response_data if response_data is not None else response.text
                 }
             })
             raise NotFoundProblem('Lot not found')
 
-        response_data = response.json()
+        if response_data is None:
+            logger.error("Expected JSON response, got empty or invalid JSON", extra={
+                "data": {
+                    "url": url,
+                    "status_code": response.status_code,
+                    "payload": payload,
+                    "response_text": response.text,
+                }
+            })
+            raise BadRequestProblem(detail='Invalid JSON response from API')
 
         return self.process_response(response_data, schema)
 
@@ -82,6 +103,13 @@ class BaseClient(ABC):
     def process_response(self, response_data: dict | list, schema: "EndpointSchema") -> Type[T]:
         ...
 
+    def _safe_json(self, response: httpx.Response) -> Any | None:
+        if not response.content:
+            return None
+        try:
+            return response.json()
+        except ValueError:
+            return None
 
 
 
