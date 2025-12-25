@@ -14,5 +14,8 @@ async def get_title_indicators(data: TitleIndicatorsIn = Depends(), db: AsyncSes
     service = TitleIndicatorsService(db)
     result = await service.get_by_title_name_n_site(data.site, data.title_name)
     if not result or not result.status:
+        title_name = data.title_name.lower()
+        if title_name.startswith("salvage"):
+            return TitleIndicatorsOut(color='green')
         return TitleIndicatorsOut(color='grey')
     return TitleIndicatorsOut(color=result.status)
