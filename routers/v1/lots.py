@@ -32,7 +32,7 @@ async def get_by_lot_id_or_vin(
     return await get_lot_vin_or_lot_id(api, data.site, vin_or_lot)
 
 @cars_router.get("/current-bid", response_model=CurrentBidOut, description='Get current bid for lot by its lot_id')
-@cache(expire=60*10, key_builder=default_key_builder)
+@cache(expire=60*5, key_builder=default_key_builder)
 async def get_current_bid(data: LotByIDIn = Query(),
                           api: AuctionApiClient = Depends(get_auction_api_service),):
     logger.debug('New request to get current bid by lot id', extra={'data': data.model_dump(mode='json')})
@@ -48,6 +48,5 @@ async def get_current_lots(api: AuctionApiClient = Depends(get_auction_api_servi
         search_params.auction_date_from = datetime.now(UTC)
     data = await transform_slugs(search_params, db)
     logger.debug('New request to get many current lots', extra={'data': data.model_dump(mode='json')})
-    return await api.request_with_schema(api.GET_CURRENT_LOTS, search_params)
-
+    return await api.request_with_schema(api.GET_CURRENT_LOTS, data)
 
