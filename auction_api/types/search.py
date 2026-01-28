@@ -1,9 +1,11 @@
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Literal
 
-from auction_api.types.common import SiteIn
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+
+from auction_api.types.common import SiteIn, SiteEnum
 from auction_api.types.lot import BasicLot, BasicHistoryLot
 
 
@@ -87,10 +89,20 @@ class CommonSearchParams(SiteIn):
 class CurrentSearchParams(CommonSearchParams):
     buy_now: bool | None = Field(None, description="Get only Buy Now lots")
     fuel: list[str] | None = Field(None, description="Fuel types")
+    auction_type: Literal['timed'] | None = Field(
+        None,
+        description="Auction type (only for site=2)"
+    )
+
+    @model_validator(mode="after")
+    @classmethod
+    def validate_auction_type_site(cls, data: "CurrentSearchParams"):
+        if data.auction_type is not None and data.site != SiteEnum.IAAI_NUM:
+            raise ValueError("auction_type is only supported for site=2")
+        return data
 
 class HistorySearchParams(CommonSearchParams):
     pass
-
 
 
 
