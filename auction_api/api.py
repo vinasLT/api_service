@@ -11,25 +11,28 @@ from auction_api.types.search import BasicManyCurrentLots, HistorySearchParams, 
 from basic_api import BaseClient, BaseClientIn
 from config import settings
 from core.logger import logger
-from request_schemas.lot import LotByIDIn, LotByVINIn, CurrentBidOut
+from request_schemas.lot import LotByIDIn, LotByVINIn, CurrentBidOut, GetAveragedPriceIn, StatisticsData
 
 
 class Endpoint(str, Enum):
     # current
-    LOT_BY_ID_CURRENT = 'cars/{lot_id}'
-    LOTS_CURRENT = 'cars'
+    LOT_BY_ID_CURRENT = 'cars/{lot_id}/'
+    LOTS_CURRENT = 'cars/'
 
     # all time
-    LOT_BY_VIN_FOR_ALL_TIME = 'cars/vin/all'
-    LOT_BY_ID_FOR_ALL_TIME = 'cars/lot-id/all'
+    LOT_BY_VIN_FOR_ALL_TIME = 'cars/vin/all/'
+    LOT_BY_ID_FOR_ALL_TIME = 'cars/lot-id/all/'
 
     # for lot
-    CURRENT_BID_BY_ID = 'cars/current-bid'
+    CURRENT_BID_BY_ID = 'cars/current-bid/'
 
     # history
-    HISTORY_LOTS = 'history-cars'
-    HISTORY_BY_ID = 'sale-histories/lot-id'
-    HISTORY_BY_VIN = 'sale-histories/vin'
+    HISTORY_LOTS = 'history-cars/'
+    HISTORY_BY_ID = 'sale-histories/lot-id/'
+    HISTORY_BY_VIN = 'sale-histories/vin/'
+
+    #average price
+    AVERAGE_PRICE = 'history-cars/statistic'
 
 class EndpointSchema(BaseModel):
     validation_schema: type[BaseModel]
@@ -110,6 +113,14 @@ class AuctionApiClient(BaseClient):
         out_schema_default=BasicHistoryLot,
         is_pagination=True,
         pagination_schema=BasicManyCurrentLots
+    )
+
+    GET_AVERAGES_FOR_LOT = EndpointSchema(
+        validation_schema=GetAveragedPriceIn,
+        method='GET',
+        endpoint=Endpoint.AVERAGE_PRICE,
+        out_schema_default=StatisticsData,
+        is_pagination=False,
     )
 
 
@@ -202,14 +213,13 @@ class AuctionApiClient(BaseClient):
 if __name__ == '__main__':
     async def main():
         api = AuctionApiClient()
-        response = await api.request_with_schema(api.GET_HISTORY_LOTS, HistorySearchParams(seller_type='dealer'))
+        response = await api.request_with_schema(api.GET_AVERAGES_FOR_LOT, GetAveragedPriceIn(make='BMW', model='1 Series', year_from=2010, year_to=2020, period=6))
         print(response)
         print(type(response))
-        print(len(response.data))
-        print(response.data[-1])
 
 
 
 
     asyncio.run(main())
+
 

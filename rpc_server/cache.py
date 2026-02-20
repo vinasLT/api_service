@@ -1,3 +1,4 @@
+import hashlib
 import json
 from typing import Optional, Any
 
@@ -56,21 +57,37 @@ class RedisCache:
 class CacheKeyBuilder:
 
     @staticmethod
-    def lot_by_id(lot_id: int, site: Optional[str] = None) -> str:
+    def lot_by_id(lot_id: int, site: str | None = None) -> str:
         site_part = f":{site}" if site else ""
         return f"lot:id:{lot_id}{site_part}"
 
     @staticmethod
-    def lot_by_vin_or_id(vin_or_lot: str, site: Optional[str] = None) -> str:
+    def lot_by_vin_or_id(vin_or_lot: str, site: str | None = None) -> str:
         site_part = f":{site}" if site else ""
         return f"lot:vin_or_id:{vin_or_lot}{site_part}"
 
     @staticmethod
-    def current_bid(lot_id: int, site: Optional[str] = None) -> str:
+    def current_bid(lot_id: int, site: str | None = None) -> str:
         site_part = f":{site}" if site else ""
         return f"bid:current:{lot_id}{site_part}"
 
     @staticmethod
-    def sale_history(lot_id: int, site: Optional[str] = None) -> str:
+    def sale_history(lot_id: int, site: str | None = None) -> str:
         site_part = f":{site}" if site else ""
         return f"history:sale:{lot_id}{site_part}"
+
+    @staticmethod
+    def current_lots(**filters) -> str:
+        if filters:
+            filter_json = json.dumps(filters, sort_keys=True)
+            filter_md5 = hashlib.md5(filter_json.encode('utf-8')).hexdigest()
+            return f"lots:current:{filter_md5}"
+        return "lots:current:all"
+
+    @staticmethod
+    def average_price(**filters) -> str:
+        if filters:
+            filter_json = json.dumps(filters, sort_keys=True)
+            filter_md5 = hashlib.md5(filter_json.encode('utf-8')).hexdigest()
+            return f"average_price:{filter_md5}"
+        return "average_price:without_filter"
