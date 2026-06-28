@@ -26,6 +26,7 @@ class SortEnum(str, Enum):
     """Sort field enumeration"""
     AUCTION_DATE = "auction_date"
     CREATED_AT = "created_at"
+    PRICE_NEW = "price_new"
 
 
 class DirectionEnum(str, Enum):
