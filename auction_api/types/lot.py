@@ -68,6 +68,7 @@ class BasicLot(BaseModel):
     link: Optional[HttpUrl] = None
     body_type: Optional[str] = None
     seller_type: Optional[str] = None
+    manufacturer_country: Optional[str] = None
     vehicle_score: Optional[str] = None
     form_get_type: FormGetType = Field(default=FormGetType.HISTORY)
 
@@ -88,6 +89,10 @@ class BasicLot(BaseModel):
         except Exception as e:
             logger.exception(f'Failed to parse auction_date: {e}')
             data.form_get_type = FormGetType.HISTORY
+
+        if data.vin and data.manufacturer_country is None:
+            data.manufacturer_country = AuctionApiUtils.get_manufacturer_country(data.vin)
+
         return data
 
 

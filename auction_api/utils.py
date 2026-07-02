@@ -4,6 +4,7 @@ from typing import Union, TYPE_CHECKING
 from pydantic_core import PydanticCustomError
 from rfc9457 import NotFoundProblem
 
+from auction_api.wmi_country import decode_wmi_country
 from core.logger import logger
 from request_schemas.lot import LotByIDIn, LotByVINIn
 
@@ -44,6 +45,11 @@ class AuctionApiUtils:
         elif auction.isdigit():
             return int(auction)
         raise PydanticCustomError('wrong_auction', 'Wrong auction')
+
+    @classmethod
+    def get_manufacturer_country(cls, vin: str | None) -> str | None:
+        return decode_wmi_country(vin)
+
 
 async def get_lot_vin_or_lot_id(api: "AuctionApiClient", site: "SiteEnum", vin_or_lot_id: str):
     vin_or_lot = vin_or_lot_id.replace(" ", "").upper()
