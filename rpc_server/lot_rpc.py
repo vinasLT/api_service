@@ -167,6 +167,8 @@ class LotRpc(BaseRpcService, lot_pb2_grpc.LotServiceServicer):
     TTL_CURRENT_LOTS = 60 * 60
     TTL_AVERAGE_PRICE = 60 * 360
 
+    _LOT_PROTO_EXCLUDE_FIELDS = frozenset({'manufacturer_country'})
+
     def _create_lot_by_id_data(self, lot_id: int, site: str) -> LotByIDIn:
         site_enum = self._parse_site_enum(site)
         return LotByIDIn(lot_id=lot_id, site=site_enum)
@@ -175,7 +177,11 @@ class LotRpc(BaseRpcService, lot_pb2_grpc.LotServiceServicer):
         if hasattr(lot_data, 'model_dump'):
             lot_dict = lot_data.model_dump(mode='json', exclude_none=True)
         else:
-            lot_dict = lot_data
+            lot_dict = dict(lot_data)
+
+        for field in self._LOT_PROTO_EXCLUDE_FIELDS:
+            lot_dict.pop(field, None)
+
         return lot_pb2.Lot(**lot_dict)
 
     def _process_lot_response(self, lot, response_class):
@@ -333,10 +339,7 @@ class LotRpc(BaseRpcService, lot_pb2_grpc.LotServiceServicer):
             self._set_not_found_error(context)
             return lot_pb2.GetSaleHistoryResponse()
 
-        lot_data = lot.model_dump(mode='json', exclude_none=True) if hasattr(
-            lot, 'model_dump') else lot
-
-        return lot_pb2.GetSaleHistoryResponse(lot=[lot_pb2.Lot(**lot_data)])
+        return lot_pb2.GetSaleHistoryResponse(lot=[self._convert_to_lot_proto(lot)])
 
     @handle_grpc_errors('GetCurrentLotsByFilters')
     async def GetCurrentLotsByFilters(self, request: lot_pb2.GetCurrentLotsByFiltersRequest, context):
