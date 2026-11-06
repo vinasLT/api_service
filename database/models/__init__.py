@@ -3,6 +3,7 @@ from .car_make import Make
 from .car_model import Model
 from .vehicle_type import VehicleType
 from .drive import Drive
+from .saved_lots import SavedLots
 from .document import Document
 from .status import Status
 from .damage import Damage

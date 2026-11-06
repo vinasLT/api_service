@@ -1,7 +1,9 @@
 from enum import Enum
+from typing import Annotated
 
 from dotenv import load_dotenv
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AliasChoices, Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 load_dotenv()
 
@@ -37,6 +39,27 @@ class Settings(BaseSettings):
     #Auction API
     AUCTION_API_KEY: str
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # Sitemaps
+    SITE_URL: str = ""
+    SITEMAP_BUCKET: str = Field(
+        default="", validation_alias=AliasChoices("SITEMAP_BUCKET", "S3_BUCKET")
+    )
+    SITEMAP_BUCKET_REGION: str = Field(
+        default="eu-central-1",
+        validation_alias=AliasChoices("SITEMAP_BUCKET_REGION", "AWS_REGION"),
+    )
+    SITEMAP_PREFIX: str = "sitemaps/"
+    SITEMAP_PUBLIC_BASE_URL: str = ""
+    SITEMAP_URL_TTL_SECONDS: int = 3600
+    SITEMAP_LANGUAGES: Annotated[list[str], NoDecode] = ["en", "lt"]
+
+    @field_validator("SITEMAP_LANGUAGES", mode="before")
+    @classmethod
+    def _split_languages(cls, value):
+        if isinstance(value, str):
+            return [lang.strip() for lang in value.split(",") if lang.strip()]
+        return value
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 settings = Settings()

@@ -6,11 +6,14 @@ from typing import Optional, Literal
 from pydantic import HttpUrl, BaseModel, ValidationError
 from rfc9457 import BadRequestProblem
 
+from auction_api.types.db_lot import DBUpdateLot, DBDeleteLot
 from auction_api.types.lot import BasicLot, BasicHistoryLot
-from auction_api.types.search import BasicManyCurrentLots, HistorySearchParams, CurrentSearchParams
+from auction_api.types.search import BasicManyCurrentLots, HistorySearchParams, CurrentSearchParams, DBManyLots, \
+    DBManyDeletedLots
 from basic_api import BaseClient, BaseClientIn
 from config import settings
 from core.logger import logger
+from request_schemas.db_save_schemas import DBCurrentUpdateIn, DBCurrentDeleteIn, DBAllLotsIn
 from request_schemas.lot import LotByIDIn, LotByVINIn, CurrentBidOut, GetAveragedPriceIn, StatisticsData
 
 
@@ -33,6 +36,11 @@ class Endpoint(str, Enum):
 
     #average price
     AVERAGE_PRICE = 'history-cars/statistic'
+
+    # db creation
+    DB_UPDATE_CURRENT = "db/cars/update"
+    DB_DELETE_CURRENT = "db/cars/deleted"
+    DB_GET_ALL = "db/cars/all"
 
 class EndpointSchema(BaseModel):
     validation_schema: type[BaseModel]
@@ -123,6 +131,33 @@ class AuctionApiClient(BaseClient):
         is_pagination=False,
     )
 
+    GET_DB_UPDATED_LOTS = EndpointSchema(
+        validation_schema=DBCurrentUpdateIn,
+        method="GET",
+        endpoint=Endpoint.DB_UPDATE_CURRENT,
+        out_schema_default=DBUpdateLot,
+        is_pagination=True,
+        pagination_schema=DBManyLots,
+    )
+
+    GET_DB_DELETED_LOTS = EndpointSchema(
+        validation_schema=DBCurrentDeleteIn,
+        method="GET",
+        endpoint=Endpoint.DB_DELETE_CURRENT,
+        out_schema_default=DBDeleteLot,
+        is_pagination=True,
+        pagination_schema=DBManyDeletedLots,
+    )
+
+    GET_DB_ALL_LOTS = EndpointSchema(
+        validation_schema=DBAllLotsIn,
+        method="GET",
+        endpoint=Endpoint.DB_GET_ALL,
+        out_schema_default=DBUpdateLot,
+        is_pagination=True,
+        pagination_schema=DBManyLots,
+    )
+
 
 
     def __init__(self):
@@ -156,8 +191,14 @@ class AuctionApiClient(BaseClient):
                 return dt_object <= now
         return True
 
-    def process_response(self, response_data: dict, schema: EndpointSchema):
-        logger.debug(f'Processing response data: {response_data}')
+    def process_response(self, response_data: dict | list, schema: EndpointSchema):
+        if isinstance(response_data, dict) and isinstance(response_data.get('data'), list):
+            item_count = len(response_data['data'])
+        elif isinstance(response_data, list):
+            item_count = len(response_data)
+        else:
+            item_count = None
+        logger.debug('Processing API response', extra={'endpoint': schema.endpoint.value, 'item_count': item_count})
         if response_data is None:
             logger.error('No data from API, "response_data" is None"')
             raise BadRequestProblem(detail='Not data from API')
@@ -182,8 +223,8 @@ class AuctionApiClient(BaseClient):
                     }
                     return schema.pagination_schema.model_validate(paginated_response)
                 except ValidationError as e:
-                    logger.error(f'Validation error in pagination schema: {e}',
-                                 extra={'response_data': response_data, 'error': e})
+                    logger.error(f'Validation error in pagination schema: {str(e)[:1000]}',
+                                 extra={'endpoint': schema.endpoint.value, 'error': str(e)[:1000]})
                     raise BadRequestProblem(detail='Validation error in data from API')
 
         if schema.endpoint in [Endpoint.HISTORY_BY_VIN, Endpoint.HISTORY_BY_ID]:
@@ -207,15 +248,17 @@ class AuctionApiClient(BaseClient):
 
             return schema.out_schema_default.model_validate(response_data)
         except ValidationError as e:
-            logger.error(f'Validation error in schema: {e}', extra={'response_data': response_data, 'schema': schema.__name__, 'error': e})
+            logger.error(f'Validation error in schema: {str(e)[:1000]}',
+                         extra={'endpoint': schema.endpoint.value,
+                                'schema': schema.out_schema_default.__name__,
+                                'error': str(e)[:1000]})
             raise BadRequestProblem(detail='Validation error in data from API')
 
 if __name__ == '__main__':
     async def main():
         api = AuctionApiClient()
-        response = await api.request_with_schema(api.GET_AVERAGES_FOR_LOT, GetAveragedPriceIn(make='BMW', model='1 Series', year_from=2010, year_to=2020, period=6))
-        print(response)
-        print(type(response))
+        response = await api.request_with_schema(api.GET_DB_ALL_LOTS, DBAllLotsIn(page=1, size=10))
+        print(type(response), len(response.data))
 
 
 

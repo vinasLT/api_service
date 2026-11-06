@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 from auction_api.types.common import SiteIn, SiteEnum
+from auction_api.types.db_lot import DBUpdateLot, DBDeleteLot
 from auction_api.types.lot import BasicLot, BasicHistoryLot
 
 
@@ -20,6 +21,13 @@ class BasicManyCurrentLots(BasicPaginationInfo):
 
 class BasicManyHistoryLot(BasicPaginationInfo):
     data: list[BasicHistoryLot]
+
+class DBManyLots(BasicPaginationInfo):
+    data: list[DBUpdateLot]
+
+class DBManyDeletedLots(BaseModel):
+    data: list[DBDeleteLot]
+
 
 
 class SortEnum(str, Enum):

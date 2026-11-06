@@ -5,8 +5,10 @@ echo "⏳ Waiting for DB"
 until pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER"; do
   sleep 1
 done
-echo "📦 Applying migrations"
-alembic upgrade head
+if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
+  echo "📦 Applying migrations"
+  alembic upgrade head
+fi
 
 echo "🚀 Start App"
 exec "$@"

@@ -20,6 +20,7 @@ class BaseClient(ABC):
         self.api_key = data.api_key
         self.header_name = data.header_name
         self.base_url = str(data.base_url)
+        self._http_client: httpx.AsyncClient | None = None
 
     def _build_url(self, url: str) -> str:
         return f"{self.base_url.rstrip('/')}/{url.lstrip('/')}"
@@ -27,6 +28,8 @@ class BaseClient(ABC):
     async def _make_request(self, method: str, url: str, **kwargs) -> httpx.Response:
         headers = {self.header_name: self.api_key}
         try:
+            if self._http_client is not None:
+                return await self._http_client.request(method, url, headers=headers, **kwargs)
             async with httpx.AsyncClient(timeout=10) as client:
                 return await client.request(method, url, headers=headers, **kwargs)
         except httpx.HTTPError as e:

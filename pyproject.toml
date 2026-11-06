@@ -29,6 +29,10 @@ dependencies = [
     "python-slugify (>=8.0.4,<9.0.0)",
     "greenlet (>=3.2.4,<4.0.0)",
     "requests (>=2.34.2,<3.0.0)",
+    "apscheduler (>=3.11,<4.0)",
+    "boto3 (>=1.40,<2.0)",
+    "orjson (>=3.10,<4.0)",
+    "tzdata (>=2025.2)",
 ]
 
 [tool.poetry]
@@ -42,3 +46,6 @@ pytest = "^8.4.1"
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
