@@ -10,6 +10,7 @@ from fastapi_problem.handler import new_exception_handler, add_exception_handler
 
 from config import settings
 from routers.health import health_router
+from routers.v1.admin_jobs import admin_jobs_router
 from routers.v1.filters import filters_router
 from routers.v1.lots import cars_router
 from routers.v1.history_lots import history_cars_router
@@ -58,6 +59,10 @@ public_v1_router.include_router(title_indicators_router, prefix='/lot/title-indi
 
 public_v1_router.include_router(sitemaps_router, prefix='/sitemaps', tags=["Sitemaps"])
 app.include_router(public_v1_router)
+
+admin_v1_router = APIRouter(prefix="/admin/v1")
+admin_v1_router.include_router(admin_jobs_router, prefix="/jobs", tags=["Admin Jobs"])
+app.include_router(admin_v1_router)
 
 app.include_router(health_router, tags=["Health"])
 

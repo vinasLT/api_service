@@ -33,6 +33,7 @@ dependencies = [
     "boto3 (>=1.40,<2.0)",
     "orjson (>=3.10,<4.0)",
     "tzdata (>=2025.2)",
+    "authtools @ git+https://github.com/vinasLT/shared_auth.git@v0.1.8"
 ]
 
 [tool.poetry]

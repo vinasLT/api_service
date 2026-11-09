@@ -12,6 +12,10 @@ class Environment(str, Enum):
     DEVELOPMENT = "development"
     PRODUCTION = "production"
 
+
+class Permissions(str, Enum):
+    SEO_JOBS = 'api_service.seo_jobs.all:read'
+
 class Settings(BaseSettings):
     #Application
     APP_NAME: str = "auction-api-service"
