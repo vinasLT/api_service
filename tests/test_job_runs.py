@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -238,6 +239,48 @@ def test_scheduled_child_does_not_finish_the_row(engine, no_dispose, monkeypatch
     assert row.result == {"lots": 9}
     assert row.finished_at is None
     assert row.exit_code is None
+
+
+def test_claim_run_succeeds_once(engine):
+    run_id = job_runs.queue_run("sitemap", "admin@example.com")
+
+    assert job_runs.claim_run(run_id) is True
+    assert job_runs.claim_run(run_id) is False
+
+    row = _rows(engine)[0]
+    assert row.status == job_runs.STATUS_RUNNING
+    assert row.requested_by == "admin@example.com"
+
+
+def test_fail_queued_sets_error(engine):
+    run_id = job_runs.queue_run("retired-job", None)
+
+    job_runs.fail_queued(run_id, "Unknown job")
+
+    row = _rows(engine)[0]
+    assert row.status == job_runs.STATUS_FAILED
+    assert row.error == "Unknown job"
+    assert row.exit_code == 1
+    assert row.finished_at is not None
+
+
+def test_only_one_queued_row_per_job(engine):
+    assert job_runs.queue_run("sitemap", "first@example.com") is not None
+    assert job_runs.queue_run("sitemap", "second@example.com") is None
+
+    with pytest.raises(IntegrityError):
+        with Session(engine) as session:
+            session.add(
+                JobRun(
+                    job_id="sitemap",
+                    trigger=job_runs.TRIGGER_MANUAL,
+                    status=job_runs.STATUS_QUEUED,
+                    started_at=datetime.now(timezone.utc),
+                )
+            )
+            session.commit()
+
+    assert job_runs.queue_run("lots_sync", "other@example.com") is not None
 
 
 def test_manual_run_still_exits_when_recording_fails(no_dispose, monkeypatch):

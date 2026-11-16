@@ -8,6 +8,7 @@ from database.models.job_runs import JobRun
 from jobs.job_runs import (
     STATUS_FAILED,
     STATUS_INTERRUPTED,
+    STATUS_QUEUED,
     STATUS_RUNNING,
     STATUS_SKIPPED,
     STATUS_SUCCEEDED,
@@ -31,6 +32,7 @@ SUCCESS_STATUSES = {STATUS_SUCCEEDED, STATUS_SKIPPED}
 FAILURE_STATUSES = {STATUS_FAILED, STATUS_TIMEOUT, STATUS_INTERRUPTED}
 FINISHED_STATUSES = SUCCESS_STATUSES | FAILURE_STATUSES
 ALL_STATUSES = (
+    STATUS_QUEUED,
     STATUS_RUNNING,
     STATUS_SUCCEEDED,
     STATUS_SKIPPED,
@@ -71,6 +73,7 @@ def run_out(row: JobRun) -> JobRunOut:
         duration_seconds=row.duration_seconds,
         exit_code=row.exit_code,
         error_summary=error_summary(row.error),
+        requested_by=row.requested_by,
     )
 
 
@@ -109,13 +112,17 @@ async def summarize(
     service: JobRunsService, job_id: str, spec: JobSpec | None, now: datetime
 ) -> JobSummaryOut:
     latest = await service.latest(job_id)
+    latest_started = await service.latest_not_queued(job_id)
+    queued = await service.last_with_status(job_id, {STATUS_QUEUED})
     latest_finished = await service.last_with_status(job_id, FINISHED_STATUSES)
     last_success = await service.last_with_status(job_id, SUCCESS_STATUSES)
     last_failure = await service.last_with_status(job_id, FAILURE_STATUSES)
     success_at = as_utc(last_success.started_at) if last_success is not None else None
     consecutive_failures = await service.count_since(job_id, FAILURE_STATUSES, success_at)
     counts = await service.counts_by_status(job_id, now - timedelta(hours=24))
-    overdue = _overdue(spec, latest.started_at if latest is not None else None, now)
+    overdue = _overdue(
+        spec, latest_started.started_at if latest_started is not None else None, now
+    )
     latest_was_success = (
         latest_finished is not None and latest_finished.status in SUCCESS_STATUSES
     )
@@ -127,6 +134,7 @@ async def summarize(
         schedule=spec.schedule if spec is not None else None,
         timeout_seconds=spec.timeout if spec is not None else None,
         running=latest is not None and latest.status == STATUS_RUNNING,
+        queued=queued is not None,
         healthy=latest_was_success and not overdue,
         overdue=overdue,
         consecutive_failures=consecutive_failures,

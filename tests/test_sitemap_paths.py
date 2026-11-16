@@ -28,3 +28,42 @@ def test_lot_slug_is_url_safe_and_skips_missing_parts():
 
 def test_default_sitemap_languages_are_en_and_lt():
     assert settings.SITEMAP_LANGUAGES == ["en", "lt"]
+
+
+def test_empty_slug_uses_lot():
+    path = _lot_path(_row(year=None, make=None, model=None, vin=None))
+
+    assert path == "/lot/iaai/45790487/lot"
+
+
+def test_thousands_separator_stays_a_hyphen():
+    path = _lot_path(
+        _row(year=2025, make="Others", model="20 X 10,000 Psi Air Pumps", vin="38912120")
+    )
+
+    assert path.endswith("/2025-others-20-x-10-000-psi-air-pumps-38912120")
+
+
+def test_non_decomposable_letters_are_dropped():
+    path = _lot_path(_row(year=1997, make="Lexus", model="S\u0421 300", vin=None))
+
+    assert path.endswith("/1997-lexus-s-300")
+
+
+def test_html_entities_are_kept_as_text():
+    path = _lot_path(
+        _row(
+            year=2015,
+            make="Changzhou",
+            model="8&#39; Sa Utility Traile",
+            vin="LN2UT1111FZ211575",
+        )
+    )
+
+    assert path.endswith("/2015-changzhou-8-39-sa-utility-traile-ln2ut1111fz211575")
+
+
+def test_accents_are_stripped():
+    path = _lot_path(_row(year=2012, make="\u0160koda", model="Octavia", vin=None))
+
+    assert path.endswith("/2012-skoda-octavia")

@@ -1,11 +1,13 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pydantic import BaseModel
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.crud.base import BaseService
 from database.models.job_runs import JobRun
+from jobs.job_runs import STATUS_QUEUED, STATUS_RUNNING, TRIGGER_MANUAL
 from request_schemas.job_runs import JobRunsFilterIn
 
 
@@ -33,6 +35,44 @@ class JobRunsService(BaseService[JobRun, BaseModel, BaseModel]):
 
     async def latest(self, job_id: str) -> JobRun | None:
         return await self._latest(job_id)
+
+    async def latest_not_queued(self, job_id: str) -> JobRun | None:
+        statement = (
+            select(JobRun)
+            .where(JobRun.job_id == job_id, JobRun.status != STATUS_QUEUED)
+            .order_by(JobRun.started_at.desc(), JobRun.id.desc())
+            .limit(1)
+        )
+        return await self.session.scalar(statement)
+
+    async def active_run(self, job_id: str) -> JobRun | None:
+        statement = (
+            select(JobRun)
+            .where(
+                JobRun.job_id == job_id,
+                JobRun.status.in_((STATUS_QUEUED, STATUS_RUNNING)),
+            )
+            .order_by(JobRun.started_at.desc(), JobRun.id.desc())
+            .limit(1)
+        )
+        return await self.session.scalar(statement)
+
+    async def queue(self, job_id: str, requested_by: str | None) -> JobRun:
+        row = JobRun(
+            job_id=job_id,
+            trigger=TRIGGER_MANUAL,
+            status=STATUS_QUEUED,
+            started_at=datetime.now(timezone.utc),
+            requested_by=requested_by,
+        )
+        self.session.add(row)
+        try:
+            await self.session.commit()
+        except IntegrityError:
+            await self.session.rollback()
+            raise
+        await self.session.refresh(row)
+        return row
 
     async def latest_runs(self, job_id: str, limit: int) -> list[JobRun]:
         rows = await self.session.scalars(

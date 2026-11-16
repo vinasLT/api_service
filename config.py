@@ -54,7 +54,6 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SITEMAP_BUCKET_REGION", "AWS_REGION"),
     )
     SITEMAP_PREFIX: str = "sitemaps/"
-    SITEMAP_URL_TTL_SECONDS: int = 3600
     # Languages are code-configured, not an env override.
     SITEMAP_LANGUAGES: list[str] = ["en", "lt"]
 

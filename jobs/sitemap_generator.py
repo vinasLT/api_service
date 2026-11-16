@@ -1,16 +1,19 @@
 import asyncio
+import hashlib
 import io
+import re
 import time
+import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import IO, Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from xml.sax.saxutils import escape
 
 import boto3
-from slugify import slugify
-from sqlalchemy import Row, select
+from botocore.exceptions import ClientError
+from sqlalchemy import Row, Select, select
 
 from config import settings
 from core.logger import logger
@@ -24,7 +27,12 @@ REQUIRED_SETTINGS = {
     "SITEMAP_BUCKET": "S3_BUCKET",
 }
 MAX_URLS_PER_SITEMAP = 50_000
+MAX_SITEMAP_BYTES = 50 * 1024 * 1024 - 64
 FETCH_BATCH = 20_000
+_URLSET_CLOSE = b"</urlset>\n"
+_COMBINING = re.compile(r"[\u0300-\u036f]")
+_NON_ALNUM = re.compile(r"[^a-zA-Z0-9]+")
+_MISSING_OBJECT_CODES = {"403", "404", "NoSuchKey", "NotFound", "AccessDenied"}
 
 STATIC_SITEMAP_FOLDER = "static_sitemaps/"
 STATIC_SITEMAP_SUFFIXES = (".xml", ".xml.gz")
@@ -51,23 +59,38 @@ def _path_segment(value: str) -> str:
     return quote(value, safe="-")
 
 
+def _slug_part(value: Any) -> str:
+    text = unicodedata.normalize("NFKD", "" if value is None else str(value))
+    text = _NON_ALNUM.sub("-", _COMBINING.sub("", text)).strip("-")
+    return text.lower()
+
+
 def _lot_slug(row: Row) -> str:
-    parts = (
-        str(part)
-        for part in (row.year, row.make, row.model, row.vin)
-        if part is not None
-    )
-    return slugify(" ".join(parts))
+    parts = (_slug_part(part) for part in (row.year, row.make, row.model, row.vin))
+    return "-".join(part for part in parts if part) or "lot"
 
 
 def _lot_path(row: Row) -> str:
     base_site = _path_segment(row.base_site.strip().lower())
     lot_id = _path_segment(str(row.lot_id).strip())
-    path = f"/lot/{base_site}/{lot_id}"
-    slug = _lot_slug(row)
-    if slug:
-        path = f"{path}/{slug}"
-    return escape(path)
+    return escape(f"/lot/{base_site}/{lot_id}/{_lot_slug(row)}")
+
+
+def _require_site_url() -> str:
+    value = settings.SITE_URL.strip()
+    parts = urlsplit(value)
+    if (
+        parts.scheme not in {"http", "https"}
+        or not parts.hostname
+        or parts.path not in {"", "/"}
+        or parts.query
+        or parts.fragment
+    ):
+        raise RuntimeError(
+            "SITE_URL must be an absolute http(s) URL with no path, "
+            f"got {settings.SITE_URL!r}"
+        )
+    return value.rstrip("/")
 
 
 def _sitemap_key(name: str) -> str:
@@ -83,8 +106,8 @@ def _mb(size: int) -> float:
     return size / (1024 * 1024)
 
 
-async def _stream_lot_batches() -> AsyncIterator[Sequence[Row]]:
-    statement = (
+def _lot_batch_statement() -> Select:
+    return (
         select(
             SavedLots.base_site,
             SavedLots.lot_id,
@@ -98,8 +121,13 @@ async def _stream_lot_batches() -> AsyncIterator[Sequence[Row]]:
             SavedLots.is_deleted.is_(False),
             SavedLots.base_site.is_not(None),
         )
+        .order_by(SavedLots.lot_id, SavedLots.site)
         .execution_options(yield_per=FETCH_BATCH)
     )
+
+
+async def _stream_lot_batches() -> AsyncIterator[Sequence[Row]]:
+    statement = _lot_batch_statement()
     async with AsyncSessionLocal() as session:
         result = await session.stream(statement)
         async for batch in result.partitions():
@@ -121,19 +149,23 @@ class SitemapChunkWriter:
         self.chunks: list[SitemapChunk] = []
         self._current: SitemapChunk | None = None
 
-    def add(self, entry: bytes, lastmod: datetime | None) -> SitemapChunk | None:
+    def add(self, entry: bytes) -> SitemapChunk | None:
         """Returns the previous chunk once it is full and ready to upload."""
         finished = None
         chunk = self._current
-        if chunk is None or chunk.url_count >= MAX_URLS_PER_SITEMAP:
+        if chunk is None or self._is_full(chunk, entry):
             finished = self._close_current()
             chunk = self._open_next()
 
         chunk.data.write(entry)
         chunk.url_count += 1
-        if lastmod is not None and (chunk.lastmod is None or lastmod > chunk.lastmod):
-            chunk.lastmod = lastmod
         return finished
+
+    def _is_full(self, chunk: SitemapChunk, entry: bytes) -> bool:
+        if chunk.url_count >= MAX_URLS_PER_SITEMAP:
+            return True
+        projected = chunk.data.tell() + len(entry) + len(_URLSET_CLOSE)
+        return projected > MAX_SITEMAP_BYTES
 
     def finish(self) -> SitemapChunk | None:
         return self._close_current()
@@ -151,26 +183,72 @@ class SitemapChunkWriter:
         chunk = self._current
         if chunk is None:
             return None
-        chunk.data.write(b"</urlset>\n")
+        chunk.data.write(_URLSET_CLOSE)
         chunk.size = chunk.data.tell()
         chunk.data.seek(0)
         self._current = None
         return chunk
 
 
-def _upload_fileobj(s3: Any, name: str, fileobj: IO[bytes]) -> None:
+def _parse_w3c(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%S+00:00")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc)
+
+
+def _stored_fingerprint(s3: Any, name: str) -> tuple[str | None, datetime | None]:
+    try:
+        head = s3.head_object(Bucket=settings.SITEMAP_BUCKET, Key=_sitemap_key(name))
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in _MISSING_OBJECT_CODES:
+            return None, None
+        raise
+    metadata = {key.lower(): value for key, value in (head.get("Metadata") or {}).items()}
+    return metadata.get("sha256"), _parse_w3c(metadata.get("lastmod"))
+
+
+def _upload_fileobj(
+    s3: Any, name: str, fileobj: IO[bytes], metadata: dict[str, str] | None = None
+) -> None:
+    extra: dict[str, Any] = {"ContentType": XML_CONTENT_TYPE}
+    if metadata:
+        extra["Metadata"] = metadata
     s3.upload_fileobj(
         fileobj,
         settings.SITEMAP_BUCKET,
         _sitemap_key(name),
-        ExtraArgs={"ContentType": XML_CONTENT_TYPE},
+        ExtraArgs=extra,
     )
 
 
+def publish_sitemap(s3: Any, name: str, data: bytes, run_lastmod: datetime) -> tuple[datetime, bool]:
+    """Upload `data` unless the stored object already has the same bytes.
+
+    Returns the file's lastmod and whether a new object was uploaded.
+    """
+    digest = hashlib.sha256(data).hexdigest()
+    stored_hash, stored_lastmod = _stored_fingerprint(s3, name)
+    if stored_hash == digest and stored_lastmod is not None:
+        return stored_lastmod, False
+    _upload_fileobj(
+        s3,
+        name,
+        io.BytesIO(data),
+        {"sha256": digest, "lastmod": _w3c_datetime(run_lastmod)},
+    )
+    return run_lastmod, True
+
+
 class ChunkUploader:
-    def __init__(self, s3: Any):
+    def __init__(self, s3: Any, run_lastmod: datetime):
         self.s3 = s3
+        self.run_lastmod = run_lastmod
         self.uploaded: list[SitemapChunk] = []
+        self.skipped = 0
         self._slots = asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)
         self._tasks: set[asyncio.Task] = set()
 
@@ -190,7 +268,13 @@ class ChunkUploader:
 
     async def _upload(self, chunk: SitemapChunk) -> None:
         try:
-            await asyncio.to_thread(_upload_fileobj, self.s3, chunk.name, chunk.data)
+            data = chunk.data.getvalue()
+            lastmod, uploaded = await asyncio.to_thread(
+                publish_sitemap, self.s3, chunk.name, data, self.run_lastmod
+            )
+            chunk.lastmod = lastmod
+            if not uploaded:
+                self.skipped += 1
             self.uploaded.append(chunk)
         finally:
             chunk.data = None
@@ -256,7 +340,7 @@ async def _build_and_upload_lot_sitemaps(
             entry_tail_bytes = f"{entry_tail}</url>\n".encode("utf-8")
 
             for lang, writer in writers.items():
-                finished = writer.add(loc_prefixes[lang] + entry_tail_bytes, lastmod)
+                finished = writer.add(loc_prefixes[lang] + entry_tail_bytes)
                 if finished is not None:
                     await timings.track_upload_wait(uploader.submit(finished))
 
@@ -347,9 +431,11 @@ async def run() -> dict:
         logger.warning("Sitemap generation skipped: saved_lots is empty")
         return {"skipped": "not_bootstrapped"}
 
+    _require_site_url()
+    started_at = datetime.now(timezone.utc).replace(microsecond=0)
     logger.info("Starting sitemap generation")
     s3 = boto3.client("s3", region_name=settings.SITEMAP_BUCKET_REGION)
-    uploader = ChunkUploader(s3)
+    uploader = ChunkUploader(s3, started_at)
 
     try:
         chunks, lot_count = await _build_and_upload_lot_sitemaps(uploader)
@@ -359,8 +445,9 @@ async def run() -> dict:
 
     url_count = sum(chunk.url_count for chunk in chunks)
     logger.info(
-        "Uploaded {} lot sitemaps with {} URLs for {} lots ({:.1f} MB)",
-        len(chunks),
+        "Uploaded {} lot sitemaps ({} unchanged) with {} URLs for {} lots ({:.1f} MB)",
+        len(chunks) - uploader.skipped,
+        uploader.skipped,
         url_count,
         lot_count,
         _mb(sum(chunk.size for chunk in chunks)),
@@ -369,8 +456,10 @@ async def run() -> dict:
     static_sitemaps = await asyncio.to_thread(_list_static_sitemaps, s3)
     logger.info("Found {} static sitemaps", len(static_sitemaps))
     index = _build_index(chunks, static_sitemaps)
-    await asyncio.to_thread(_upload_fileobj, s3, INDEX_NAME, index)
-    logger.info("Uploaded {}", INDEX_NAME)
+    _, index_uploaded = await asyncio.to_thread(
+        publish_sitemap, s3, INDEX_NAME, index.getvalue(), started_at
+    )
+    logger.info("{} {}", "Uploaded" if index_uploaded else "Unchanged", INDEX_NAME)
 
     keep_names = {chunk.name for chunk in chunks} | {INDEX_NAME}
     deleted_count = await asyncio.to_thread(_delete_stale_sitemaps, s3, keep_names)

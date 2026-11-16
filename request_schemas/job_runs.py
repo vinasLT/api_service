@@ -23,6 +23,7 @@ class LastRunOut(BaseModel):
 
 
 class StatusCountsOut(BaseModel):
+    queued: int = 0
     running: int = 0
     succeeded: int = 0
     skipped: int = 0
@@ -41,6 +42,7 @@ class JobRunOut(BaseModel):
     duration_seconds: float | None
     exit_code: int | None
     error_summary: str | None = None
+    requested_by: str | None = None
 
 
 class JobRunDetailOut(JobRunOut):
@@ -60,6 +62,7 @@ class JobSummaryOut(BaseModel):
     schedule: str | None
     timeout_seconds: int | None
     running: bool
+    queued: bool = False
     healthy: bool
     overdue: bool
     consecutive_failures: int

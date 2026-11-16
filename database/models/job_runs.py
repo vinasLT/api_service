@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Text, func
+from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database.models.base import Base
@@ -12,6 +12,13 @@ class JobRun(Base):
     __table_args__ = (
         Index("ix_job_runs_job_id_started_at", "job_id", "started_at"),
         Index("ix_job_runs_status", "status"),
+        Index(
+            "ux_job_runs_one_queued",
+            "job_id",
+            unique=True,
+            postgresql_where=text("status = 'queued'"),
+            sqlite_where=text("status = 'queued'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -26,3 +33,4 @@ class JobRun(Base):
     exit_code: Mapped[Optional[int]] = mapped_column(Integer)
     result: Mapped[Optional[dict]] = mapped_column(JSON)
     error: Mapped[Optional[str]] = mapped_column(Text)
+    requested_by: Mapped[Optional[str]] = mapped_column(String(255))

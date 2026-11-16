@@ -9,6 +9,7 @@ from database.models.job_runs import JobRun
 
 JOB_RUN_ID_ENV = "JOB_RUN_ID"
 
+STATUS_QUEUED = "queued"
 STATUS_RUNNING = "running"
 STATUS_SUCCEEDED = "succeeded"
 STATUS_SKIPPED = "skipped"
@@ -35,6 +36,80 @@ def _final_status(exit_code: int | None, timed_out: bool, result: object) -> str
     if isinstance(result, dict) and "skipped" in result:
         return STATUS_SKIPPED
     return STATUS_SUCCEEDED
+
+
+def queue_run(
+    job_id: str, requested_by: str | None = None, engine: Engine | None = None
+) -> int | None:
+    """Insert a queued manual run. Returns None when recording fails."""
+    try:
+        with Session(_bind(engine)) as session:
+            row = JobRun(
+                job_id=job_id,
+                trigger=TRIGGER_MANUAL,
+                status=STATUS_QUEUED,
+                started_at=datetime.now(timezone.utc),
+                requested_by=requested_by,
+            )
+            session.add(row)
+            session.commit()
+            return row.id
+    except Exception:
+        logger.exception("Failed to queue job run for {}", job_id)
+        return None
+
+
+def claim_run(run_id: int, engine: Engine | None = None) -> bool:
+    """Mark a queued row as running. False when another worker already claimed it."""
+    try:
+        with Session(_bind(engine)) as session:
+            result = session.execute(
+                update(JobRun)
+                .where(JobRun.id == run_id, JobRun.status == STATUS_QUEUED)
+                .values(status=STATUS_RUNNING, started_at=datetime.now(timezone.utc))
+            )
+            session.commit()
+            return result.rowcount == 1
+    except Exception:
+        logger.exception("Failed to claim job run {}", run_id)
+        return False
+
+
+def fail_queued(run_id: int, error: str, engine: Engine | None = None) -> None:
+    """Fail a queued row that can no longer be started."""
+    try:
+        with Session(_bind(engine)) as session:
+            session.execute(
+                update(JobRun)
+                .where(JobRun.id == run_id, JobRun.status == STATUS_QUEUED)
+                .values(
+                    status=STATUS_FAILED,
+                    error=error,
+                    finished_at=datetime.now(timezone.utc),
+                    exit_code=1,
+                )
+            )
+            session.commit()
+    except Exception:
+        logger.exception("Failed to fail queued job run {}", run_id)
+
+
+def queued_runs(engine: Engine | None = None) -> list[JobRun]:
+    """Queued rows, oldest first. Empty when the read fails."""
+    try:
+        with Session(_bind(engine)) as session:
+            rows = list(
+                session.scalars(
+                    select(JobRun)
+                    .where(JobRun.status == STATUS_QUEUED)
+                    .order_by(JobRun.started_at, JobRun.id)
+                )
+            )
+            session.expunge_all()
+            return rows
+    except Exception:
+        logger.exception("Failed to list queued job runs")
+        return []
 
 
 def start_run(job_id: str, trigger: str, engine: Engine | None = None) -> int | None:

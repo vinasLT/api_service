@@ -1,31 +1,76 @@
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
 import pytest
 from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 
 import routers.v1.sitemaps as sitemaps
-from config import Settings, settings
-from main import app
+from config import Settings
+
+
+class StubBody:
+    def __init__(self, data: bytes):
+        self.data = data
+        self.closed = False
+
+    def iter_chunks(self, size: int = 64 * 1024):
+        for start in range(0, len(self.data), size):
+            yield self.data[start : start + size]
+
+    def close(self):
+        self.closed = True
 
 
 class StubS3:
     def __init__(self, error_code: str | None = None):
         self.error_code = error_code
         self.calls: list[tuple[str, dict]] = []
+        self.body = b'<?xml version="1.0" encoding="UTF-8"?>\n<urlset></urlset>\n'
+        self.etag = '"abc123"'
+        # botocore returns a tz that is not datetime.timezone.utc
+        self.last_modified = datetime(2026, 11, 16, 12, 0, tzinfo=ZoneInfo("UTC"))
 
     def head_object(self, **params):
         self.calls.append(("head_object", params))
-        if self.error_code:
-            raise ClientError({"Error": {"Code": self.error_code}}, "HeadObject")
+        self._maybe_error("HeadObject", params)
+        return self._head()
 
-    def generate_presigned_url(self, operation, Params, ExpiresIn):
-        self.calls.append((operation, {**Params, "ExpiresIn": ExpiresIn}))
-        return f"https://s3.example/{Params['Bucket']}/{Params['Key']}?signed"
+    def get_object(self, **params):
+        self.calls.append(("get_object", params))
+        self._maybe_error("GetObject", params)
+        return {**self._head(), "Body": StubBody(self.body)}
+
+    def _head(self) -> dict:
+        return {
+            "ETag": self.etag,
+            "LastModified": self.last_modified,
+            "ContentLength": len(self.body),
+        }
+
+    def _maybe_error(self, operation: str, params: dict):
+        if params.get("IfNoneMatch") == self.etag:
+            raise ClientError(
+                {
+                    "Error": {"Code": "304", "Message": "Not Modified"},
+                    "ResponseMetadata": {
+                        "HTTPStatusCode": 304,
+                        "HTTPHeaders": {
+                            "etag": self.etag,
+                            "last-modified": "Mon, 16 Nov 2026 12:00:00 GMT",
+                        },
+                    },
+                },
+                operation,
+            )
+        if self.error_code:
+            raise ClientError({"Error": {"Code": self.error_code}}, operation)
 
 
 @pytest.fixture
 def s3(monkeypatch):
-    monkeypatch.setattr(settings, "SITEMAP_BUCKET", "vinas-files")
-    monkeypatch.setattr(settings, "SITEMAP_PREFIX", "sitemaps/")
+    monkeypatch.setattr(sitemaps.settings, "SITEMAP_BUCKET", "vinas-files")
+    monkeypatch.setattr(sitemaps.settings, "SITEMAP_PREFIX", "sitemaps/")
 
     def install(error_code: str | None = None) -> StubS3:
         stub = StubS3(error_code)
@@ -37,7 +82,13 @@ def s3(monkeypatch):
 
 @pytest.fixture
 def client():
-    return TestClient(app, follow_redirects=False)
+    return TestClient(app_client(), follow_redirects=False)
+
+
+def app_client():
+    from main import app
+
+    return app
 
 
 def test_settings_read_bucket_and_region_from_shared_secrets(monkeypatch):
@@ -56,30 +107,74 @@ def test_settings_read_bucket_and_region_from_shared_secrets(monkeypatch):
     assert Settings().SITEMAP_BUCKET == "sitemap-only-bucket"
 
 
-def test_existing_sitemap_redirects_to_presigned_url(s3, client):
+def test_existing_sitemap_is_streamed(s3, client):
     stub = s3()
 
     response = client.get("/public/v1/sitemaps/sitemap.xml")
 
-    assert response.status_code == 302
-    assert response.headers["location"] == (
-        "https://s3.example/vinas-files/sitemaps/sitemap.xml?signed"
+    assert response.status_code == 200
+    assert response.content == stub.body
+    assert response.headers["content-type"] == "application/xml; charset=utf-8"
+    assert response.headers["cache-control"] == "public, max-age=300"
+    assert response.headers["etag"] == stub.etag
+    assert response.headers["last-modified"] == "Mon, 16 Nov 2026 12:00:00 GMT"
+    assert "location" not in response.headers
+    assert stub.calls == [
+        (
+            "get_object",
+            {"Bucket": "vinas-files", "Key": "sitemaps/sitemap.xml"},
+        )
+    ]
+
+
+def test_head_returns_headers_without_a_body(s3, client):
+    stub = s3()
+
+    response = client.head("/public/v1/sitemaps/sitemap.xml")
+
+    assert response.status_code == 200
+    assert response.content == b""
+    assert response.headers["etag"] == stub.etag
+    assert response.headers["content-type"] == "application/xml; charset=utf-8"
+    assert stub.calls[0][0] == "head_object"
+
+
+def test_if_none_match_returns_304(s3, client):
+    stub = s3()
+
+    response = client.get(
+        "/public/v1/sitemaps/sitemap.xml",
+        headers={"If-None-Match": stub.etag},
     )
-    assert response.headers["cache-control"] == "no-store"
-    assert stub.calls[0] == (
-        "head_object",
-        {"Bucket": "vinas-files", "Key": "sitemaps/sitemap.xml"},
+
+    assert response.status_code == 304
+    assert response.content == b""
+    assert response.headers["etag"] == stub.etag
+    assert response.headers["cache-control"] == "public, max-age=300"
+    assert stub.calls[0][1]["IfNoneMatch"] == stub.etag
+
+
+def test_if_modified_since_is_forwarded(s3, client):
+    stub = s3()
+
+    response = client.get(
+        "/public/v1/sitemaps/sitemap.xml",
+        headers={"If-Modified-Since": "Sun, 01 Nov 2026 00:00:00 GMT"},
     )
-    assert stub.calls[1][1]["ExpiresIn"] == settings.SITEMAP_URL_TTL_SECONDS
+
+    assert response.status_code == 200
+    forwarded = stub.calls[0][1]["IfModifiedSince"]
+    assert forwarded == datetime(2026, 11, 1, tzinfo=timezone.utc)
 
 
 def test_nested_static_sitemap_path_is_allowed(s3, client):
-    s3()
+    stub = s3()
 
     response = client.get("/public/v1/sitemaps/static_sitemaps/pages.xml.gz")
 
-    assert response.status_code == 302
-    assert response.headers["location"].endswith("sitemaps/static_sitemaps/pages.xml.gz?signed")
+    assert response.status_code == 200
+    assert response.content == stub.body
+    assert stub.calls[0][1]["Key"] == "sitemaps/static_sitemaps/pages.xml.gz"
 
 
 @pytest.mark.parametrize("error_code", ["404", "NoSuchKey", "AccessDenied"])

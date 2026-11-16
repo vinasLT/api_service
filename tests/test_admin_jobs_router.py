@@ -160,6 +160,7 @@ def test_job_summaries_report_health_failures_and_overdue(client):
     assert sync["last_success_at"].startswith("2026-11-09T06:00")
     assert sync["last_failure_at"].startswith("2026-11-09T08:05")
     assert sync["last_24h"] == {
+        "queued": 0,
         "running": 0,
         "succeeded": 1,
         "skipped": 0,
@@ -167,6 +168,7 @@ def test_job_summaries_report_health_failures_and_overdue(client):
         "timeout": 0,
         "interrupted": 0,
     }
+    assert sync["queued"] is False
     assert sync["next_run_at"] is not None
 
     sitemap = jobs["sitemap"]
@@ -265,6 +267,72 @@ def test_run_detail_includes_traceback_and_result(client):
     failed_detail = test_client.get(f"/admin/v1/jobs/runs/{failed.json()['items'][0]['id']}")
     assert failed_detail.status_code == 200
     assert failed_detail.json()["error"] == TRACEBACK
+
+
+def test_start_job_queues_a_manual_run(client):
+    test_client, _pending = client
+
+    response = test_client.post("/admin/v1/jobs/sitemap/runs")
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["job_id"] == "sitemap"
+    assert body["status"] == "queued"
+    assert body["trigger"] == "manual"
+    assert body["requested_by"] == "test@example.com"
+
+    summary = test_client.get("/admin/v1/jobs")
+    sitemap = {item["job_id"]: item for item in summary.json()}["sitemap"]
+    assert sitemap["queued"] is True
+    assert sitemap["running"] is False
+    assert sitemap["last_24h"]["queued"] == 1
+
+
+def test_start_unknown_job_is_not_found(client):
+    test_client, _pending = client
+    assert test_client.post("/admin/v1/jobs/does-not-exist/runs").status_code == 404
+
+
+def test_start_conflicts_when_job_is_active(client):
+    test_client, pending = client
+    pending.append(
+        _run(
+            "sitemap",
+            "running",
+            datetime(2026, 11, 9, 9, 0, tzinfo=timezone.utc),
+            finished_at=None,
+            exit_code=None,
+            duration_seconds=None,
+        )
+    )
+
+    assert test_client.post("/admin/v1/jobs/sitemap/runs").status_code == 409
+
+    pending.append(
+        _run(
+            "lots_sync",
+            "queued",
+            datetime(2026, 11, 9, 9, 1, tzinfo=timezone.utc),
+            finished_at=None,
+            exit_code=None,
+            duration_seconds=None,
+            trigger="manual",
+        )
+    )
+    assert test_client.post("/admin/v1/jobs/lots_sync/runs").status_code == 409
+
+
+def test_start_requires_permission(client):
+    test_client, _pending = client
+    app.dependency_overrides[get_user] = lambda: HeaderUser(
+        uuid="test-user",
+        email="test@example.com",
+        roles=["user"],
+        permissions=[],
+        token_expire="9999999999",
+    )
+
+    assert test_client.post("/admin/v1/jobs/sitemap/runs").status_code == 403
 
 
 def test_unknown_job_and_run_are_not_found(client):
