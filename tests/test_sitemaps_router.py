@@ -59,16 +59,16 @@ def test_settings_read_bucket_and_region_from_shared_secrets(monkeypatch):
 def test_existing_sitemap_redirects_to_presigned_url(s3, client):
     stub = s3()
 
-    response = client.get("/public/v1/sitemaps/sitemap-index.xml")
+    response = client.get("/public/v1/sitemaps/sitemap.xml")
 
     assert response.status_code == 302
     assert response.headers["location"] == (
-        "https://s3.example/vinas-files/sitemaps/sitemap-index.xml?signed"
+        "https://s3.example/vinas-files/sitemaps/sitemap.xml?signed"
     )
     assert response.headers["cache-control"] == "no-store"
     assert stub.calls[0] == (
         "head_object",
-        {"Bucket": "vinas-files", "Key": "sitemaps/sitemap-index.xml"},
+        {"Bucket": "vinas-files", "Key": "sitemaps/sitemap.xml"},
     )
     assert stub.calls[1][1]["ExpiresIn"] == settings.SITEMAP_URL_TTL_SECONDS
 

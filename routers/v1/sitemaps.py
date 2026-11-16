@@ -59,7 +59,7 @@ def _presigned_sitemap_url(key: str) -> str | None:
     "/{path:path}",
     response_class=RedirectResponse,
     status_code=302,
-    description="Redirect to a short-lived S3 URL of a generated sitemap, e.g. sitemap-index.xml",
+    description="Redirect to a short-lived S3 URL of a generated sitemap, e.g. sitemap.xml",
 )
 async def get_sitemap(path: str):
     if not _is_valid_sitemap_path(path):

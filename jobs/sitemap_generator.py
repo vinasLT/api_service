@@ -28,7 +28,7 @@ FETCH_BATCH = 20_000
 
 STATIC_SITEMAP_FOLDER = "static_sitemaps/"
 STATIC_SITEMAP_SUFFIXES = (".xml", ".xml.gz")
-INDEX_NAME = "sitemap-index.xml"
+INDEX_NAME = "sitemap.xml"
 S3_DELETE_BATCH = 1000
 MAX_CONCURRENT_UPLOADS = 4
 PROGRESS_LOG_EVERY = 100_000
@@ -75,7 +75,7 @@ def _sitemap_key(name: str) -> str:
 
 
 def _sitemap_public_url(name: str) -> str:
-    # Traefik exposes sitemaps on the site domain (e.g. domain.com/sitemap-index.xml).
+    # Traefik exposes sitemaps on the site domain (e.g. domain.com/sitemap.xml).
     return f"{settings.SITE_URL.rstrip('/')}/{name}"
 
 
