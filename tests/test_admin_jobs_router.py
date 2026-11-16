@@ -2,16 +2,29 @@ import asyncio
 from datetime import datetime, timezone
 
 import pytest
+from AuthTools.Permissions.serialize import get_user
+from AuthTools.models.user import HeaderUser
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from config import Permissions
 from database.db.session import get_async_db
 from database.models.job_runs import JobRun
 from main import app
 
 FROZEN = datetime(2026, 11, 9, 10, 0, tzinfo=timezone.utc)
 TRACEBACK = "Traceback (most recent call last):\n  File \"job.py\", line 1, in <module>\nRuntimeError: feed down"
+
+
+def _authorized_user() -> HeaderUser:
+    return HeaderUser(
+        uuid="test-user",
+        email="test@example.com",
+        roles=["admin"],
+        permissions=[Permissions.SEO_JOBS.value],
+        token_expire="9999999999",
+    )
 
 
 @pytest.fixture
@@ -40,9 +53,11 @@ def client(monkeypatch):
             yield session
 
     app.dependency_overrides[get_async_db] = override_db
+    app.dependency_overrides[get_user] = _authorized_user
     with TestClient(app) as test_client:
         yield test_client, pending
     app.dependency_overrides.pop(get_async_db, None)
+    app.dependency_overrides.pop(get_user, None)
     engine = state.get("engine")
     if engine is not None:
         asyncio.run(engine.dispose())
