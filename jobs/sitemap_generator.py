@@ -20,10 +20,8 @@ from jobs.common import has_saved_lots, run_job
 
 # Setting name -> env var to set when it is missing.
 REQUIRED_SETTINGS = {
-    "SITE_URL": "SITE_URL",
+    "SITE_URL": "COMPANY_LINK",
     "SITEMAP_BUCKET": "S3_BUCKET",
-    "SITEMAP_PUBLIC_BASE_URL": "SITEMAP_PUBLIC_BASE_URL",
-    "SITEMAP_LANGUAGES": "SITEMAP_LANGUAGES",
 }
 MAX_URLS_PER_SITEMAP = 50_000
 FETCH_BATCH = 20_000
@@ -77,7 +75,8 @@ def _sitemap_key(name: str) -> str:
 
 
 def _sitemap_public_url(name: str) -> str:
-    return f"{settings.SITEMAP_PUBLIC_BASE_URL.rstrip('/')}/{name}"
+    # Traefik exposes sitemaps on the site domain (e.g. domain.com/sitemap-index.xml).
+    return f"{settings.SITE_URL.rstrip('/')}/{name}"
 
 
 def _mb(size: int) -> float:

@@ -17,7 +17,7 @@ services:
   # Saved-lots jobs; start with `docker compose --profile jobs up scheduler`.
   # Needs a reachable Postgres (DB_* in .env) and DEBUG=false. The sitemap job
   # also needs AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, S3_BUCKET,
-  # SITE_URL and SITEMAP_PUBLIC_BASE_URL (the api container needs the AWS/S3 ones too).
+  # and COMPANY_LINK/SITE_URL (the api container needs the AWS/S3 ones too).
   scheduler:
     build: .
     container_name: api_service_scheduler
