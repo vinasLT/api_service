@@ -6,6 +6,7 @@ from rfc9457 import BadRequestProblem, NotFoundProblem
 
 from auction_api.types.common import SiteEnum
 from core.logger import logger, log_async_execution_time
+from services.provider_usage import record_provider_call
 from .types import BaseClientIn
 import httpx
 
@@ -33,12 +34,11 @@ class BaseClient(ABC):
             async with httpx.AsyncClient(timeout=10) as client:
                 return await client.request(method, url, headers=headers, **kwargs)
         except httpx.HTTPError as e:
+            # Headers contain the provider API key, so they stay out of the log.
             logger.error(f"Request to API Failed", exc_info=e, extra={
                 'data': {
                     'url': url,
-                    'headers': headers,
-                    'kwargs': kwargs,
-                    'error': e
+                    'error': str(e),
                 }
             })
             raise BadRequestProblem(detail='Request to API Failed') from e
@@ -57,6 +57,17 @@ class BaseClient(ABC):
                 payload['site'] = [1, 2]
 
         logger.debug(f"Request payload: {payload}, url: {url}, data: {data}")
+        endpoint = schema.endpoint.value
+        logger.info(
+            "Provider call",
+            extra={
+                "data": {
+                    "endpoint": endpoint,
+                    "cache_result": "miss",
+                }
+            },
+        )
+        await record_provider_call(endpoint)
 
         if schema.method == "GET":
             response = await self._make_request("GET", url, params=payload)

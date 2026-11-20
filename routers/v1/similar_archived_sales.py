@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Query, Depends
+from fastapi import APIRouter, Depends, Query
 
 from auction_api.api import AuctionApiClient
-from auction_api.types.search import HistorySearchParams, BasicManyCurrentLots
+from auction_api.types.search import BasicManyHistoryLot, HistorySearchParams
 from core.logger import logger
 from dependencies.auction_api_service import get_auction_api_service
 from schemas.similar_archived_sales import SimilarArchivedSalesPricesOut
 from schemas.similar_history_lots import SimilarHistoryLots
+from services.provider_cache import TTL_HISTORY_CARS_SIMILAR, cached_provider_call
 
 similar_sales_router = APIRouter()
 
@@ -19,33 +20,40 @@ def _build_history_search_params(data: SimilarHistoryLots) -> HistorySearchParam
         year_from=year_from,
         year_to=year_to,
         vehicle_type=data.vehicle_type,
-        site=data.site
+        site=data.site,
     )
 
 
-@similar_sales_router.get('', response_model=BasicManyCurrentLots)
+async def _similar_history(api: AuctionApiClient, data: SimilarHistoryLots) -> BasicManyHistoryLot:
+    params = _build_history_search_params(data)
+    return await cached_provider_call(
+        api,
+        AuctionApiClient.GET_HISTORY_LOTS,
+        params,
+        ttl=TTL_HISTORY_CARS_SIMILAR,
+    )
+
+
+@similar_sales_router.get("", response_model=BasicManyHistoryLot)
 async def get_similar_sales(
-        data: SimilarHistoryLots = Query(...),
-        api: AuctionApiClient = Depends(get_auction_api_service)
+    data: SimilarHistoryLots = Query(...),
+    api: AuctionApiClient = Depends(get_auction_api_service),
 ):
-    params = _build_history_search_params(data)
-    logger.debug('New request to get many history lots', extra={'data': params.model_dump()})
-    return await api.request_with_schema(AuctionApiClient.GET_HISTORY_LOTS, params)
+    logger.debug("New request to get many history lots", extra={"data": data.model_dump()})
+    return await _similar_history(api, data)
 
 
-@similar_sales_router.get('/prices', response_model=SimilarArchivedSalesPricesOut)
+@similar_sales_router.get("/prices", response_model=SimilarArchivedSalesPricesOut)
 async def get_similar_sales_prices(
-        data: SimilarHistoryLots = Query(...),
-        api: AuctionApiClient = Depends(get_auction_api_service)
+    data: SimilarHistoryLots = Query(...),
+    api: AuctionApiClient = Depends(get_auction_api_service),
 ):
-    params = _build_history_search_params(data)
-    logger.debug('New request to get similar archived sales prices', extra={'data': params.model_dump()})
-
-    result = await api.request_with_schema(AuctionApiClient.GET_HISTORY_LOTS, params)
+    logger.debug("New request to get similar archived sales prices", extra={"data": data.model_dump()})
+    result = await _similar_history(api, data)
 
     prices: list[int] = []
     for lot in result.data:
-        price = getattr(lot, 'purchase_price', None)
+        price = getattr(lot, "purchase_price", None)
         if isinstance(price, int) and price > 0:
             prices.append(price)
 

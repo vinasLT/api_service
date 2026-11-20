@@ -1,30 +1,38 @@
 from contextlib import asynccontextmanager
 
-import redis
 import uvicorn
-from fastapi import FastAPI, APIRouter
+from fastapi import APIRouter, FastAPI
+from fastapi.responses import PlainTextResponse
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
-
-from fastapi_problem.handler import new_exception_handler, add_exception_handler
+from fastapi_problem.handler import add_exception_handler, new_exception_handler
 
 from config import settings
+from core.logger import logger
 from routers.health import health_router
 from routers.v1.admin_jobs import admin_jobs_router
+from routers.v1.admin_provider_usage import admin_provider_usage_router
 from routers.v1.filters import filters_router
-from routers.v1.lots import cars_router
 from routers.v1.history_lots import history_cars_router
+from routers.v1.lots import cars_router
 from routers.v1.sales_history import sales_history_router
 from routers.v1.similar_archived_sales import similar_sales_router
 from routers.v1.sitemaps import sitemaps_router
 from routers.v1.title_indicators import title_indicators_router
+from services import redis_client
+
+_API_ROBOTS = "User-agent: *\nDisallow: /auction-api/\n"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    redis_client = redis.Redis.from_url(settings.REDIS_URL)
-    FastAPICache.init(RedisBackend(redis_client), prefix="fastapi-cache")
+    try:
+        cache_redis = await redis_client.init_redis()
+        FastAPICache.init(RedisBackend(cache_redis), prefix="fastapi-cache")
+    except Exception:
+        logger.exception("Redis cache is unavailable; provider calls will not be cached")
     yield
+    await redis_client.close_redis()
 
 
 docs_url = "/docs" if settings.enable_docs else None
@@ -42,6 +50,11 @@ app = FastAPI(lifespan=lifespan,
 
 eh = new_exception_handler()
 add_exception_handler(app, eh)
+
+
+@app.get("/robots.txt", include_in_schema=False)
+async def api_robots():
+    return PlainTextResponse(_API_ROBOTS)
 
 
 public_v1_router = APIRouter(prefix="/public/v1")
@@ -62,6 +75,9 @@ app.include_router(public_v1_router)
 
 admin_v1_router = APIRouter(prefix="/admin/v1")
 admin_v1_router.include_router(admin_jobs_router, prefix="/jobs", tags=["Admin Jobs"])
+admin_v1_router.include_router(
+    admin_provider_usage_router, prefix="/provider-usage", tags=["Provider Usage"]
+)
 app.include_router(admin_v1_router)
 
 app.include_router(health_router, tags=["Health"])

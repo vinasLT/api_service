@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # Languages are code-configured, not an env override.
     SITEMAP_LANGUAGES: list[str] = ["en", "lt"]
 
+    # Optional. When both are set, sold-lot URL changes are purged from Cloudflare.
+    CLOUDFLARE_API_TOKEN: str = ""
+    CLOUDFLARE_ZONE_ID: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 settings = Settings()

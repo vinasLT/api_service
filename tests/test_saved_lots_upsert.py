@@ -79,6 +79,20 @@ def test_deleted_lots_are_not_resurrected_without_replace(db):
     assert (row.is_deleted, row.vin) == (False, "AGAIN")
 
 
+def test_sale_result_columns_survive_feed_upserts():
+    for column in (
+        "sale_history",
+        "sale_status",
+        "sale_date",
+        "purchase_price",
+        "sale_history_fetched_at",
+    ):
+        assert column in upsert.EXCLUDED_COLUMNS
+        assert column not in upsert.UPSERT_COLUMNS
+    assert "sale_history" not in upsert._merge_sql(replace=True)
+    assert "sale_history" not in upsert._merge_sql(replace=False)
+
+
 def test_records_from_api_items_keeps_newest_per_lot():
     items = [
         {"lot_id": 7, "site": 1, "vin": "OLD", "updated_at": "2026-10-01T00:00:00"},

@@ -7,6 +7,7 @@ from config import settings
 from jobs.sitemap_generator import (
     SitemapChunkWriter,
     _lot_batch_statement,
+    _lot_lastmod,
     _lot_path,
     _require_site_url,
     publish_sitemap,
@@ -37,6 +38,22 @@ class MemoryS3:
 def bucket(monkeypatch):
     monkeypatch.setattr(settings, "SITEMAP_BUCKET", "vinas-files")
     monkeypatch.setattr(settings, "SITEMAP_PREFIX", "sitemaps/")
+
+
+def test_lot_lastmod_stays_stable_when_the_feed_refreshes():
+    created = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    updated = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    active = _row(created_at=created, updated_at=updated, is_deleted=False, deleted_at=None)
+    assert _lot_lastmod(active) == created
+
+    deleted_at = datetime(2025, 5, 1, tzinfo=timezone.utc)
+    sold = _row(
+        created_at=created,
+        updated_at=updated,
+        is_deleted=True,
+        deleted_at=deleted_at,
+    )
+    assert _lot_lastmod(sold) == deleted_at
 
 
 def test_lot_batches_are_ordered_by_lot_and_site():

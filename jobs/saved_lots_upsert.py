@@ -56,7 +56,21 @@ INTEGER_COLUMNS = frozenset(
 FLOAT_COLUMNS = frozenset({"engine_size", "latitude", "longitude"})
 BOOL_COLUMNS = frozenset({"is_buynow", "is_offsite", "is_tbo", "is_title_pending"})
 DATETIME_COLUMNS = frozenset({"auction_date", "timed_auction_close_date", "updated_at"})
-EXCLUDED_COLUMNS = frozenset({"id", "created_at", "is_deleted", "deleted_at"})
+EXCLUDED_COLUMNS = frozenset(
+    {
+        "id",
+        "created_at",
+        "is_deleted",
+        "deleted_at",
+        # Kept across feed upserts, including replace=True, so a stored sale
+        # result is not wiped when the current-lot feed rewrites the row.
+        "sale_history",
+        "sale_status",
+        "sale_date",
+        "purchase_price",
+        "sale_history_fetched_at",
+    }
+)
 UPSERT_COLUMNS = tuple(
     column.name
     for column in SavedLots.__table__.columns
