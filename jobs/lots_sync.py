@@ -77,14 +77,29 @@ async def _mark_deleted_lots(
 async def _purge_sold_pages(deleted_keys: set[tuple[str, int]]) -> None:
     if not deleted_keys or not cloudflare_configured():
         return
+    # A single tuple IN of this size overflows PostgreSQL's parser stack
+    # (max_stack_depth / StatementTooComplexError). Same chunk size as the
+    # delete update above.
+    rows = []
+    deleted_key_iterator = iter(deleted_keys)
     async with AsyncSessionLocal() as session:
-        rows = (
-            await session.execute(
-                select(SavedLots).where(
-                    tuple_(SavedLots.lot_id, SavedLots.site).in_(list(deleted_keys))
-                )
+        while batch := list(
+            islice(deleted_key_iterator, SQLITE_MAX_BIND_PARAMETERS // 2)
+        ):
+            rows.extend(
+                (
+                    await session.execute(
+                        select(
+                            SavedLots.lot_id,
+                            SavedLots.base_site,
+                            SavedLots.year,
+                            SavedLots.make,
+                            SavedLots.model,
+                            SavedLots.vin,
+                        ).where(tuple_(SavedLots.lot_id, SavedLots.site).in_(batch))
+                    )
+                ).all()
             )
-        ).scalars().all()
     await purge_lot_urls(rows)
 
 

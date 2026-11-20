@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import jobs.lots_sync as lots_sync
@@ -77,6 +77,53 @@ def test_deleted_lots_are_not_resurrected_without_replace(db):
     assert asyncio.run(upsert.save_lots([newer], engine=engine, replace=True)) == 1
     row = _rows(session_factory)[("2", 2)]
     assert (row.is_deleted, row.vin) == (False, "AGAIN")
+
+
+def test_purge_sold_pages_queries_keys_in_batches(db, monkeypatch):
+    engine, _session_factory = db
+    monkeypatch.setattr(lots_sync, "SQLITE_MAX_BIND_PARAMETERS", 4)
+    monkeypatch.setattr(lots_sync, "cloudflare_configured", lambda: True)
+    purged: list = []
+
+    async def capture(rows):
+        purged.extend(rows)
+
+    monkeypatch.setattr(lots_sync, "purge_lot_urls", capture)
+
+    statements: list[str] = []
+
+    def before_cursor_execute(_conn, _cursor, statement, _parameters, _context, _executemany):
+        if "IN (" in statement and "saved_lots" in statement:
+            statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", before_cursor_execute)
+    try:
+        asyncio.run(
+            upsert.save_lots(
+                [
+                    DBUpdateLot(
+                        lot_id=index,
+                        site=1,
+                        base_site="copart",
+                        year=2020,
+                        make="Ford",
+                        model="F150",
+                        vin=f"VIN{index}",
+                        updated_at=NEW,
+                    )
+                    for index in range(5)
+                ],
+                engine=engine,
+            )
+        )
+        statements.clear()
+        keys = {(str(index), 1) for index in range(5)}
+        asyncio.run(lots_sync._purge_sold_pages(keys))
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", before_cursor_execute)
+
+    assert len(statements) == 3
+    assert {row.lot_id for row in purged} == {"0", "1", "2", "3", "4"}
 
 
 def test_sale_result_columns_survive_feed_upserts():
