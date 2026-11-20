@@ -11,7 +11,6 @@ admin_provider_usage_router = APIRouter()
 class ProviderEndpointUsage(BaseModel):
     endpoint: str
     calls: int
-    bot_calls: int
 
 
 class ProviderUsageOut(BaseModel):

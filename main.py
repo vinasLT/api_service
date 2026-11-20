@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, FastAPI
 from fastapi.responses import PlainTextResponse
 from fastapi_cache import FastAPICache
 from fastapi_cache.backends.redis import RedisBackend
@@ -16,12 +16,10 @@ from routers.v1.filters import filters_router
 from routers.v1.history_lots import history_cars_router
 from routers.v1.lots import cars_router
 from routers.v1.sales_history import sales_history_router
-from routers.v1.saved_lots import saved_lots_router
 from routers.v1.similar_archived_sales import similar_sales_router
 from routers.v1.sitemaps import sitemaps_router
 from routers.v1.title_indicators import title_indicators_router
 from services import redis_client
-from services.provider_usage import is_crawler
 
 _API_ROBOTS = "User-agent: *\nDisallow: /auction-api/\n"
 
@@ -54,15 +52,6 @@ eh = new_exception_handler()
 add_exception_handler(app, eh)
 
 
-@app.middleware("http")
-async def mark_crawler_requests(request: Request, call_next):
-    token = is_crawler.set(request.headers.get("x-crawler") == "1")
-    try:
-        return await call_next(request)
-    finally:
-        is_crawler.reset(token)
-
-
 @app.get("/robots.txt", include_in_schema=False)
 async def api_robots():
     return PlainTextResponse(_API_ROBOTS)
@@ -71,7 +60,6 @@ async def api_robots():
 public_v1_router = APIRouter(prefix="/public/v1")
 
 public_v1_router.include_router(cars_router, prefix='/lot/current', tags=["Public Current Lots"])
-public_v1_router.include_router(saved_lots_router, prefix='/lot', tags=["Saved Lots"])
 public_v1_router.include_router(history_cars_router, prefix='/lot/history', tags=["Public History Lots"])
 
 public_v1_router.include_router(filters_router, prefix='/filters', tags=["Filters"])

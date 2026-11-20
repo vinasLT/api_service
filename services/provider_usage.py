@@ -1,16 +1,12 @@
-"""Counts real calls to the auction provider, including which ones came from crawlers."""
+"""Counts real calls to the auction provider."""
 
-from contextvars import ContextVar
 from datetime import datetime, timezone
 
 from core.logger import logger
 from services.redis_client import get_redis
 
-is_crawler: ContextVar[bool] = ContextVar("is_crawler", default=False)
-
 RETENTION_SECONDS = 14 * 24 * 60 * 60
 CALLS_PREFIX = "provider:calls"
-BOT_CALLS_PREFIX = "provider:bot-calls"
 
 
 def _day(day: str | None = None) -> str:
@@ -19,10 +15,6 @@ def _day(day: str | None = None) -> str:
 
 def _calls_key(day: str, endpoint: str) -> str:
     return f"{CALLS_PREFIX}:{day}:{endpoint}"
-
-
-def _bot_calls_key(day: str, endpoint: str) -> str:
-    return f"{BOT_CALLS_PREFIX}:{day}:{endpoint}"
 
 
 def _decode(value: bytes | str | None) -> str:
@@ -45,10 +37,6 @@ async def record_provider_call(endpoint: str) -> None:
         pipe = client.pipeline()
         pipe.incr(total_key)
         pipe.expire(total_key, RETENTION_SECONDS)
-        if is_crawler.get():
-            bot_key = _bot_calls_key(day, endpoint)
-            pipe.incr(bot_key)
-            pipe.expire(bot_key, RETENTION_SECONDS)
         await pipe.execute()
     except Exception as exc:
         logger.warning(f"Failed to record provider call: {exc}")
@@ -84,13 +72,8 @@ async def _endpoints_for(prefix: str, day: str) -> dict[str, int]:
 async def read_provider_usage(day: str | None = None) -> dict:
     usage_day = _day(day)
     totals = await _endpoints_for(CALLS_PREFIX, usage_day)
-    bots = await _endpoints_for(BOT_CALLS_PREFIX, usage_day)
     endpoints = [
-        {
-            "endpoint": endpoint,
-            "calls": totals.get(endpoint, 0),
-            "bot_calls": bots.get(endpoint, 0),
-        }
-        for endpoint in sorted(set(totals) | set(bots))
+        {"endpoint": endpoint, "calls": calls}
+        for endpoint, calls in sorted(totals.items())
     ]
     return {"date": usage_day, "endpoints": endpoints}

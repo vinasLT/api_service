@@ -6,7 +6,7 @@ from rfc9457 import BadRequestProblem, NotFoundProblem
 
 from auction_api.types.common import SiteEnum
 from core.logger import logger, log_async_execution_time
-from services.provider_usage import is_crawler, record_provider_call
+from services.provider_usage import record_provider_call
 from .types import BaseClientIn
 import httpx
 
@@ -64,7 +64,6 @@ class BaseClient(ABC):
                 "data": {
                     "endpoint": endpoint,
                     "cache_result": "miss",
-                    "is_bot": is_crawler.get(),
                 }
             },
         )

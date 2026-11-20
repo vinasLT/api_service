@@ -11,7 +11,6 @@ from rfc9457 import NotFoundProblem
 from auction_api.api import EndpointSchema
 from auction_api.types.lot import BasicHistoryLot
 from core.logger import logger
-from services.provider_usage import is_crawler
 from services.redis_client import get_redis
 
 TTL_NOT_FOUND = 12 * 60 * 60
@@ -55,7 +54,6 @@ def _log(endpoint: str, cache_result: str) -> None:
             "data": {
                 "endpoint": endpoint,
                 "cache_result": cache_result,
-                "is_bot": is_crawler.get(),
             }
         },
     )
@@ -154,7 +152,6 @@ async def cached_provider_call(
     data: BaseModel,
     *,
     ttl: int | Callable[[Any], int],
-    request_kwargs: dict | None = None,
 ) -> Any:
     """Return a cached provider response, fetching it once when several callers arrive together."""
     endpoint = schema.endpoint.value
@@ -181,7 +178,7 @@ async def cached_provider_call(
             return _unpack(schema, cached)
 
         try:
-            result = await api.request_with_schema(schema, data, **(request_kwargs or {}))
+            result = await api.request_with_schema(schema, data)
         except NotFoundProblem:
             await _write(key, {"kind": _NOT_FOUND}, TTL_NOT_FOUND)
             _log(endpoint, "miss")

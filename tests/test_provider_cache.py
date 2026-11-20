@@ -17,7 +17,7 @@ from main import app
 from request_schemas.lot import LotByIDIn
 from services.http_cache import query_key_builder
 from services.provider_cache import cached_provider_call, sale_history_ttl
-from services.provider_usage import is_crawler, read_provider_usage, record_provider_call
+from services.provider_usage import read_provider_usage, record_provider_call
 from services.redis_client import set_redis
 
 
@@ -227,20 +227,16 @@ def test_concurrent_callers_share_one_provider_request(fake_redis):
     assert second.purchase_price == first.purchase_price
 
 
-def test_provider_usage_counts_bot_calls(fake_redis):
+def test_provider_usage_counts_calls(fake_redis):
     async def run():
-        token = is_crawler.set(True)
-        try:
-            await record_provider_call("history-cars")
-        finally:
-            is_crawler.reset(token)
+        await record_provider_call("history-cars")
         await record_provider_call("history-cars")
         return await read_provider_usage()
 
     usage = asyncio.run(run())
     history = next(item for item in usage["endpoints"] if item["endpoint"] == "history-cars")
     assert history["calls"] == 2
-    assert history["bot_calls"] == 1
+    assert "bot_calls" not in history
 
 
 @pytest.fixture
@@ -306,69 +302,6 @@ def test_similar_sales_and_prices_share_one_call(client):
     assert prices.status_code == 200
     assert prices.json()["min_price"] == 80
     assert calls == ["history-cars"]
-
-
-def test_saved_sold_lot_fetches_sale_history_once(client):
-    test_client, calls, maker = client
-
-    async def insert():
-        async with maker() as session:
-            session.add(
-                SavedLots(
-                    lot_id="42",
-                    site=1,
-                    base_site="copart",
-                    vin="1HGCM82633A004352",
-                    year=2003,
-                    make="Honda",
-                    model="Accord",
-                    is_deleted=True,
-                )
-            )
-            await session.commit()
-
-    asyncio.run(insert())
-    first = test_client.get("/public/v1/lot/saved", params={"lot_id": 42, "site": "copart"})
-    second = test_client.get("/public/v1/lot/saved", params={"lot_id": 42, "site": "copart"})
-
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert first.json()["form_get_type"] == "history"
-    assert first.json()["purchase_price"] == 50
-    assert calls == ["sale-histories/lot-id"]
-
-
-def test_saved_active_lot_does_not_call_the_provider(client):
-    test_client, calls, maker = client
-
-    async def insert():
-        async with maker() as session:
-            session.add(
-                SavedLots(
-                    lot_id="7",
-                    site=2,
-                    base_site="iaai",
-                    make="Ford",
-                    model="Focus",
-                    year=2020,
-                    is_deleted=False,
-                )
-            )
-            await session.commit()
-
-    asyncio.run(insert())
-    response = test_client.get("/public/v1/lot/saved", params={"lot_id": 7, "site": 2})
-
-    assert response.status_code == 200
-    assert response.json()["form_get_type"] == "active"
-    assert calls == []
-
-
-def test_missing_saved_lot_is_not_found(client):
-    test_client, calls, _maker = client
-    response = test_client.get("/public/v1/lot/saved", params={"lot_id": 404, "site": 1})
-    assert response.status_code == 404
-    assert calls == []
 
 
 def test_api_robots_disallows_the_public_api():
