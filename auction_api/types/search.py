@@ -81,6 +81,7 @@ class CommonSearchParams(SiteIn):
     damage_pr: list[str] | None = Field(None, description="Primary damage types")
 
     document: list[str] | None = Field(None, description="Document types")
+    cylinders: list[int] | None = Field(None, description="Cylinder counts")
     odometer_min: int | None = Field(None, ge=0, description="Minimum odometer")
     odometer_max: int | None = Field(None, ge=0, description="Maximum odometer")
     seller_type: SellerTypeEnum | None = Field(None, description="Seller type")

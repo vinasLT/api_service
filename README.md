@@ -29,6 +29,7 @@ Query params:
 - `drive` (repeatable)
 - `damage_pr` (repeatable)
 - `document` (repeatable)
+- `cylinders` (repeatable integers)
 - `odometer_min`, `odometer_max`
 - `seller_type` (`insurance` or `dealer`)
 - `sort` (`auction_date` or `created_at`)
