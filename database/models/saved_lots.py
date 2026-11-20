@@ -101,3 +101,10 @@ class SavedLots(Base):
 
     is_deleted: Mapped[bool] = mapped_column(default=False)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Sale result, filled once after the lot is sold. The sync jobs do not write these.
+    sale_history: Mapped[Optional[list]] = mapped_column(JSON)
+    sale_status: Mapped[Optional[str]] = mapped_column(String)
+    sale_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    purchase_price: Mapped[Optional[int]]
+    sale_history_fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

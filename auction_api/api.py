@@ -8,8 +8,14 @@ from rfc9457 import BadRequestProblem
 
 from auction_api.types.db_lot import DBUpdateLot, DBDeleteLot
 from auction_api.types.lot import BasicLot, BasicHistoryLot
-from auction_api.types.search import BasicManyCurrentLots, HistorySearchParams, CurrentSearchParams, DBManyLots, \
-    DBManyDeletedLots
+from auction_api.types.search import (
+    BasicManyCurrentLots,
+    BasicManyHistoryLot,
+    HistorySearchParams,
+    CurrentSearchParams,
+    DBManyLots,
+    DBManyDeletedLots,
+)
 from basic_api import BaseClient, BaseClientIn
 from config import settings
 from core.logger import logger
@@ -120,7 +126,7 @@ class AuctionApiClient(BaseClient):
         endpoint=Endpoint.HISTORY_LOTS,
         out_schema_default=BasicHistoryLot,
         is_pagination=True,
-        pagination_schema=BasicManyCurrentLots
+        pagination_schema=BasicManyHistoryLot,
     )
 
     GET_AVERAGES_FOR_LOT = EndpointSchema(

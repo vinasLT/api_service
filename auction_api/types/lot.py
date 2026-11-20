@@ -84,7 +84,9 @@ class BasicLot(BaseModel):
                 else:
                     data.form_get_type = FormGetType.HISTORY
             else:
-                if hasattr(data, 'sale_date'):
+                # Only a real sale date marks the lot archived. The field existing
+                # on the model is not enough, so an explicit active value is kept.
+                if getattr(data, 'sale_date', None):
                     data.form_get_type = FormGetType.HISTORY
         except Exception as e:
             logger.exception(f'Failed to parse auction_date: {e}')

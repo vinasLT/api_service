@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, Path
-from fastapi_cache import default_key_builder
 from fastapi_cache.decorator import cache
 from rfc9457 import NotFoundProblem
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,11 +14,12 @@ from database.crud.vehicle_type import VehicleTypeService
 from database.db.session import get_async_db
 from database.schemas.filters import FilterRead
 from schemas.filters import AllFiltersOut
+from services.http_cache import query_key_builder
 
 filters_router = APIRouter()
 
 @filters_router.get("/all-filters", description='Get all static filters', response_model=AllFiltersOut)
-@cache(expire=60*360, key_builder=default_key_builder)
+@cache(expire=60*360, key_builder=query_key_builder)
 async def filters(
         db: AsyncSession = Depends(get_async_db),
 ):

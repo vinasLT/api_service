@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from itertools import islice
 
 import httpx
-from sqlalchemy import tuple_, update
+from sqlalchemy import select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from auction_api.api import AuctionApiClient
@@ -12,6 +12,7 @@ from auction_api.types.db_lot import DBDeleteLot, DBUpdateLot
 from core.logger import logger
 from database.db.session import AsyncSessionLocal, engine_async
 from database.models.saved_lots import SavedLots
+from services.cloudflare_cache import cloudflare_configured, purge_lot_urls
 from jobs.common import has_saved_lots, run_job
 from jobs.locks import SAVED_LOTS_WRITE_LOCK, advisory_lock
 from jobs.saved_lots_upsert import (
@@ -69,7 +70,22 @@ async def _mark_deleted_lots(
                     .values(is_deleted=True, deleted_at=deleted_at)
                 )
                 marked_count += result.rowcount or 0
+    await _purge_sold_pages(deleted_keys)
     return deleted_keys, marked_count
+
+
+async def _purge_sold_pages(deleted_keys: set[tuple[str, int]]) -> None:
+    if not deleted_keys or not cloudflare_configured():
+        return
+    async with AsyncSessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(SavedLots).where(
+                    tuple_(SavedLots.lot_id, SavedLots.site).in_(list(deleted_keys))
+                )
+            )
+        ).scalars().all()
+    await purge_lot_urls(rows)
 
 
 async def _fetch_all_updated_lots(

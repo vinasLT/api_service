@@ -70,10 +70,23 @@ def _lot_slug(row: Row) -> str:
     return "-".join(part for part in parts if part) or "lot"
 
 
-def _lot_path(row: Row) -> str:
+def lot_public_path(row: Row) -> str:
     base_site = _path_segment(row.base_site.strip().lower())
     lot_id = _path_segment(str(row.lot_id).strip())
-    return escape(f"/lot/{base_site}/{lot_id}/{_lot_slug(row)}")
+    return f"/lot/{base_site}/{lot_id}/{_lot_slug(row)}"
+
+
+def _lot_path(row: Row) -> str:
+    return escape(lot_public_path(row))
+
+
+def _lot_lastmod(row: Row) -> datetime | None:
+    """Stable lastmod. Feed refreshes change updated_at and must not recrawl the URL."""
+    if getattr(row, "is_deleted", False):
+        value = getattr(row, "deleted_at", None) or getattr(row, "created_at", None)
+    else:
+        value = getattr(row, "created_at", None)
+    return _as_utc(value) if value is not None else None
 
 
 def _require_site_url() -> str:
@@ -115,12 +128,11 @@ def _lot_batch_statement() -> Select:
             SavedLots.make,
             SavedLots.model,
             SavedLots.vin,
-            SavedLots.updated_at,
+            SavedLots.created_at,
+            SavedLots.is_deleted,
+            SavedLots.deleted_at,
         )
-        .where(
-            SavedLots.is_deleted.is_(False),
-            SavedLots.base_site.is_not(None),
-        )
+        .where(SavedLots.base_site.is_not(None))
         .order_by(SavedLots.lot_id, SavedLots.site)
         .execution_options(yield_per=FETCH_BATCH)
     )
@@ -144,8 +156,9 @@ class SitemapChunk:
 
 
 class SitemapChunkWriter:
-    def __init__(self, lang: str):
+    def __init__(self, lang: str, name_prefix: str = "sitemap-lots"):
         self.lang = lang
+        self.name_prefix = name_prefix
         self.chunks: list[SitemapChunk] = []
         self._current: SitemapChunk | None = None
 
@@ -171,7 +184,7 @@ class SitemapChunkWriter:
         return self._close_current()
 
     def _open_next(self) -> SitemapChunk:
-        name = f"sitemap-lots-{self.lang}-{len(self.chunks) + 1}.xml"
+        name = f"{self.name_prefix}-{self.lang}-{len(self.chunks) + 1}.xml"
         data = io.BytesIO()
         data.write(f'{XML_DECLARATION}<urlset xmlns="{SITEMAP_NS}">\n'.encode("utf-8"))
         chunk = SitemapChunk(name=name, data=data)
@@ -319,7 +332,10 @@ async def _build_and_upload_lot_sitemaps(
     uploader: ChunkUploader,
 ) -> tuple[list[SitemapChunk], int]:
     languages = settings.SITEMAP_LANGUAGES
-    writers = {lang: SitemapChunkWriter(lang) for lang in languages}
+    active_writers = {lang: SitemapChunkWriter(lang) for lang in languages}
+    sold_writers = {
+        lang: SitemapChunkWriter(lang, name_prefix="sitemap-lots-sold") for lang in languages
+    }
     site_url = escape(settings.SITE_URL.rstrip("/"))
     loc_prefixes = {
         lang: f"<url><loc>{site_url}/{lang}".encode("utf-8") for lang in languages
@@ -333,12 +349,13 @@ async def _build_and_upload_lot_sitemaps(
         timings.db_seconds += time.perf_counter() - waiting_since
 
         for row in batch:
-            lastmod = _as_utc(row.updated_at) if row.updated_at is not None else None
+            lastmod = _lot_lastmod(row)
             entry_tail = f"{_lot_path(row)}</loc>"
             if lastmod is not None:
                 entry_tail += f"<lastmod>{_w3c_datetime(lastmod)}</lastmod>"
             entry_tail_bytes = f"{entry_tail}</url>\n".encode("utf-8")
 
+            writers = sold_writers if row.is_deleted else active_writers
             for lang, writer in writers.items():
                 finished = writer.add(loc_prefixes[lang] + entry_tail_bytes)
                 if finished is not None:
@@ -350,14 +367,20 @@ async def _build_and_upload_lot_sitemaps(
             timings.log_progress(lot_count, len(uploader.uploaded))
         waiting_since = time.perf_counter()
 
-    for writer in writers.values():
-        finished = writer.finish()
-        if finished is not None:
-            await timings.track_upload_wait(uploader.submit(finished))
+    for writers in (active_writers, sold_writers):
+        for writer in writers.values():
+            finished = writer.finish()
+            if finished is not None:
+                await timings.track_upload_wait(uploader.submit(finished))
     await timings.track_upload_wait(uploader.wait())
     timings.log_progress(lot_count, len(uploader.uploaded), final=True)
 
-    chunks = [chunk for writer in writers.values() for chunk in writer.chunks]
+    chunks = [
+        chunk
+        for writers in (active_writers, sold_writers)
+        for writer in writers.values()
+        for chunk in writer.chunks
+    ]
     return chunks, lot_count
 
 
