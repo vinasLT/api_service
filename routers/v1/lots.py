@@ -11,7 +11,7 @@ from auction_api.utils import get_lot_vin_or_lot_id
 from core.logger import logger
 from database.db.session import get_async_db
 from dependencies.auction_api_service import get_auction_api_service
-from request_schemas.lot import LotByIDIn, LotByVINIn, CurrentBidOut
+from request_schemas.lot import LotByIDIn, CurrentBidOut
 from schemas.vin_or_lot import VinOrLotIn
 from services.http_cache import query_key_builder
 from services.transform_slugs import transform_slugs
