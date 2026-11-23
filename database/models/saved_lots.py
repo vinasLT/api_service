@@ -108,3 +108,4 @@ class SavedLots(Base):
     sale_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     purchase_price: Mapped[Optional[int]]
     sale_history_fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    sale_count: Mapped[Optional[int]]

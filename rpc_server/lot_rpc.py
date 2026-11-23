@@ -1,6 +1,5 @@
 import traceback
 from typing import Optional, Any, Dict, Callable, TypeVar
-import json
 from functools import wraps
 
 import grpc
@@ -12,7 +11,17 @@ from auction_api.types.search import SiteEnum, CurrentSearchParams, SellerTypeEn
 from auction_api.utils import get_lot_vin_or_lot_id
 from config import settings
 from core.logger import logger
+from database.db.session import AsyncSessionLocal
 from rpc_server.cache import RedisCache, CacheKeyBuilder
+from services.provider_cache import TTL_HISTORY_CARS_SIMILAR, cached_provider_call, sale_history_ttl
+from services.saved_lots_read import (
+    ensure_sale_history,
+    find_saved_lot,
+    find_saved_vin_or_lot,
+    saved_lot_to_model,
+    store_archival_lots,
+    store_catalog_lot,
+)
 from rpc_server.gen.python.auction.v1 import lot_pb2, lot_pb2_grpc
 from request_schemas.lot import LotByIDIn, GetAveragedPriceIn
 
@@ -59,13 +68,6 @@ class CacheManager:
         cached_data = await self.cache.get(key)
         if cached_data:
             logger.debug(f"Cache hit for key: {key}")
-
-            if isinstance(cached_data, str):
-                try:
-                    return json.loads(cached_data)
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to decode cached data: {e}")
-                    return None
             return cached_data
 
         logger.debug(f"Cache miss for key: {key}")
@@ -167,7 +169,16 @@ class LotRpc(BaseRpcService, lot_pb2_grpc.LotServiceServicer):
     TTL_CURRENT_LOTS = 60 * 60
     TTL_AVERAGE_PRICE = 60 * 360
 
-    _LOT_PROTO_EXCLUDE_FIELDS = frozenset({'manufacturer_country'})
+    _LOT_PROTO_EXCLUDE_FIELDS = frozenset({'manufacturer_country', 'sale_count'})
+
+    async def _store_provider_lot(self, lot, store) -> None:
+        if not lot:
+            return
+        try:
+            async with AsyncSessionLocal() as session:
+                await store(session, lot)
+        except Exception:
+            logger.exception("Could not open a session to store a provider lot")
 
     def _create_lot_by_id_data(self, lot_id: int, site: str) -> LotByIDIn:
         site_enum = self._parse_site_enum(site)
@@ -182,7 +193,8 @@ class LotRpc(BaseRpcService, lot_pb2_grpc.LotServiceServicer):
         for field in self._LOT_PROTO_EXCLUDE_FIELDS:
             lot_dict.pop(field, None)
 
-        return lot_pb2.Lot(**lot_dict)
+        known = {field.name for field in lot_pb2.Lot.DESCRIPTOR.fields}
+        return lot_pb2.Lot(**{key: value for key, value in lot_dict.items() if key in known})
 
     def _process_lot_response(self, lot, response_class):
         if isinstance(lot, list):
@@ -263,20 +275,23 @@ class LotRpc(BaseRpcService, lot_pb2_grpc.LotServiceServicer):
 
         self._log_request('get lot by id', lot_id=request.lot_id, site=request.site)
 
-        cache_key = CacheKeyBuilder.lot_by_id(request.lot_id, request.site)
-        data = self._create_lot_by_id_data(request.lot_id, request.site)
+        async with AsyncSessionLocal() as db:
+            row = await find_saved_lot(db, request.lot_id, request.site or None)
+            if row is not None:
+                if row.is_deleted and row.sale_history_fetched_at is None:
+                    row = await ensure_sale_history(db, self.api, row)
+                return self._process_lot_response(
+                    saved_lot_to_model(row), lot_pb2.GetLotResponse
+                )
 
-        lot = await self._execute_with_cache(
-            cache_key=cache_key,
-            api_method=AuctionApiClient.GET_LOT_BY_ID_FOR_ALL_TIME,
-            api_params=data,
-            ttl=self.TTL_LOT
-        )
+        site_enum = self._parse_site_enum(request.site)
+        lot = await get_lot_vin_or_lot_id(self.api, site_enum, str(request.lot_id))
 
         if not lot:
             self._set_not_found_error(context, 'Lot not found')
             return lot_pb2.GetLotResponse()
 
+        await self._store_provider_lot(lot, store_catalog_lot)
         return self._process_lot_response(lot, lot_pb2.GetLotResponse)
 
     @handle_grpc_errors('GetCurrentBid')
@@ -305,11 +320,12 @@ class LotRpc(BaseRpcService, lot_pb2_grpc.LotServiceServicer):
         vin_or_lot = request.vin_or_lot_id.replace(" ", "").upper()
         self._log_request('get lot by vin or lot id', vin_or_lot_id=request.vin_or_lot_id)
 
-        cache_key = CacheKeyBuilder.lot_by_vin_or_id(vin_or_lot, request.site)
-
-        cached_lot = await self.cache_manager.get_cached_data(cache_key)
-        if cached_lot:
-            return self._process_lot_response(cached_lot, lot_pb2.GetLotByVinOrLotResponse)
+        async with AsyncSessionLocal() as db:
+            rows = await find_saved_vin_or_lot(db, request.site or None, vin_or_lot)
+            if rows:
+                lots = [saved_lot_to_model(row) for row in rows]
+                payload = lots[0] if len(lots) == 1 else lots
+                return self._process_lot_response(payload, lot_pb2.GetLotByVinOrLotResponse)
 
         site_enum = self._parse_site_enum(request.site)
         lot = await get_lot_vin_or_lot_id(self.api, site_enum, vin_or_lot)
@@ -318,22 +334,26 @@ class LotRpc(BaseRpcService, lot_pb2_grpc.LotServiceServicer):
             self._set_not_found_error(context)
             return lot_pb2.GetLotByVinOrLotResponse()
 
-        cache_data = self._prepare_cache_data(lot if isinstance(lot, list) else [lot])
-        await self.cache_manager.set_cache_data(cache_key, cache_data, self.TTL_VIN_LOOKUP)
-
+        await self._store_provider_lot(lot, store_catalog_lot)
         return self._process_lot_response(lot, lot_pb2.GetLotByVinOrLotResponse)
 
     @handle_grpc_errors('GetSaleHistory')
     async def GetSaleHistory(self, request: lot_pb2.GetSaleHistoryRequest, context):
-        cache_key = CacheKeyBuilder.sale_history(request.lot_id, request.site)
         data = self._create_lot_by_id_data(request.lot_id, request.site)
-
-        lot = await self._execute_with_cache(
-            cache_key=cache_key,
-            api_method=AuctionApiClient.GET_LOT_HISTORY_BY_ID,
-            api_params=data,
-            ttl=self.TTL_SALE_HISTORY
-        )
+        async with AsyncSessionLocal() as db:
+            row = await find_saved_lot(db, request.lot_id, request.site or None)
+            if row is not None:
+                if row.is_deleted and row.sale_history_fetched_at is None:
+                    row = await ensure_sale_history(db, self.api, row)
+                lot = saved_lot_to_model(row)
+            else:
+                lot = await cached_provider_call(
+                    self.api,
+                    AuctionApiClient.GET_LOT_HISTORY_BY_ID,
+                    data,
+                    ttl=sale_history_ttl,
+                )
+                await store_archival_lots(db, lot)
 
         if not lot:
             self._set_not_found_error(context)
@@ -394,18 +414,12 @@ class LotRpc(BaseRpcService, lot_pb2_grpc.LotServiceServicer):
         }
 
         data = self._clean_request_data(data)
-        cache_key = CacheKeyBuilder.average_price(**data)
-
-        cached_price = await self.cache_manager.get_cached_data(cache_key)
-        if cached_price:
-            return self.transform_average_price_to_proto(cached_price)
-
-        prices = await self.api.request_with_schema(
+        prices = await cached_provider_call(
+            self.api,
             AuctionApiClient.GET_AVERAGES_FOR_LOT,
-            GetAveragedPriceIn(**data)
+            GetAveragedPriceIn(**data),
+            ttl=TTL_HISTORY_CARS_SIMILAR,
         )
 
         prices_data = prices.model_dump(mode='json', exclude_none=True)
-        await self.cache_manager.set_cache_data(cache_key, prices_data, self.TTL_AVERAGE_PRICE)
-
         return self.transform_average_price_to_proto(prices_data)

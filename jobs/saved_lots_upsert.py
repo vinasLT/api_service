@@ -69,6 +69,7 @@ EXCLUDED_COLUMNS = frozenset(
         "sale_date",
         "purchase_price",
         "sale_history_fetched_at",
+        "sale_count",
     }
 )
 UPSERT_COLUMNS = tuple(

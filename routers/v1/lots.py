@@ -14,22 +14,30 @@ from dependencies.auction_api_service import get_auction_api_service
 from request_schemas.lot import LotByIDIn, CurrentBidOut
 from schemas.vin_or_lot import VinOrLotIn
 from services.http_cache import query_key_builder
+from services.saved_lots_read import find_saved_vin_or_lot, saved_lot_to_model, store_catalog_lot
 from services.transform_slugs import transform_slugs
 
 cars_router = APIRouter()
 
 @cars_router.get("/vin-or-lot-id", response_model=list[BasicLot] | list[BasicHistoryLot] | BasicLot | BasicHistoryLot,
                  description='Get lot by vin or lot id')
-# @cache(expire=60*30, key_builder=default_key_builder)
+@cache(expire=60 * 15, key_builder=query_key_builder)
 async def get_by_lot_id_or_vin(
     data: VinOrLotIn = Query(...),
+    db: AsyncSession = Depends(get_async_db),
     api: AuctionApiClient = Depends(get_auction_api_service),
 ):
     logger.debug('New request to get lot by vin or lot', extra={'data': data.model_dump(mode='json')})
 
     vin_or_lot = data.vin_or_lot.replace(" ", "").upper()
+    rows = await find_saved_vin_or_lot(db, data.site, vin_or_lot)
+    if rows:
+        lots = [saved_lot_to_model(row) for row in rows]
+        return lots[0] if len(lots) == 1 else lots
 
-    return await get_lot_vin_or_lot_id(api, data.site, vin_or_lot)
+    result = await get_lot_vin_or_lot_id(api, data.site, vin_or_lot)
+    await store_catalog_lot(db, result)
+    return result
 
 @cars_router.get("/current-bid", response_model=CurrentBidOut, description='Get current bid for lot by its lot_id')
 @cache(expire=60*5, key_builder=query_key_builder)

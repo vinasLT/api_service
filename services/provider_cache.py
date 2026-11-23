@@ -8,12 +8,12 @@ from typing import Any
 from pydantic import BaseModel
 from rfc9457 import NotFoundProblem
 
-from auction_api.api import EndpointSchema
-from auction_api.types.lot import BasicHistoryLot
+from auction_api.api import AuctionApiClient, EndpointSchema
 from core.logger import logger
 from services.redis_client import get_redis
 
 TTL_NOT_FOUND = 12 * 60 * 60
+TTL_CURRENT_LOT = 15 * 60
 TTL_SALE_HISTORY_SOLD = 30 * 24 * 60 * 60
 TTL_SALE_HISTORY_UNSOLD = 6 * 60 * 60
 TTL_HISTORY_CARS_SIMILAR = 7 * 24 * 60 * 60
@@ -46,6 +46,21 @@ def sale_history_ttl(result: Any) -> int:
     return TTL_SALE_HISTORY_UNSOLD
 
 
+def catalog_lot_ttl(result: Any) -> int:
+    """Active catalog lots use the current-lot TTL. Past lots use the history TTLs.
+
+    A lot with no auction date stays on the short TTL unless the provider sent
+    form_get_type. The model otherwise defaults that field to history.
+    """
+    if getattr(result, "form_get_type", None) == "active":
+        return TTL_CURRENT_LOT
+    if getattr(result, "auction_date", None) is not None:
+        return sale_history_ttl(result)
+    if not getattr(result, "form_get_type_explicit", False):
+        return TTL_CURRENT_LOT
+    return sale_history_ttl(result)
+
+
 def _log(endpoint: str, cache_result: str) -> None:
     logger.info(
         "Provider cache {}",
@@ -61,16 +76,27 @@ def _log(endpoint: str, cache_result: str) -> None:
 
 def _serialize(result: Any) -> Any:
     if isinstance(result, BaseModel):
-        return result.model_dump(mode="json")
+        payload = result.model_dump(mode="json")
+        if "form_get_type_explicit" in type(result).model_fields:
+            payload["form_get_type_explicit"] = bool(result.form_get_type_explicit)
+        return payload
     if isinstance(result, list):
         return [_serialize(item) for item in result]
     return result
 
 
+def _model_for_body(schema: EndpointSchema, body: Any):
+    if isinstance(body, dict):
+        return AuctionApiClient.model_for_item(schema, body)
+    return schema.out_schema_history or schema.out_schema_default
+
+
 def _deserialize(schema: EndpointSchema, body: Any) -> Any:
     if schema.is_pagination and schema.pagination_schema and isinstance(body, dict):
-        item_schema = schema.out_schema_history or schema.out_schema_default
-        items = [item_schema.model_validate(item) for item in body.get("data") or []]
+        items = [
+            _model_for_body(schema, item).model_validate(item)
+            for item in body.get("data") or []
+        ]
         return schema.pagination_schema.model_construct(
             size=body.get("size") or 0,
             page=body.get("page") or 0,
@@ -79,12 +105,12 @@ def _deserialize(schema: EndpointSchema, body: Any) -> Any:
             data=items,
         )
 
-    model = schema.out_schema_history or schema.out_schema_default
     if isinstance(body, list):
-        restored = [model.model_validate(item) for item in body]
+        restored = [_model_for_body(schema, item).model_validate(item) for item in body]
         return restored[0] if len(restored) == 1 else restored
-    if isinstance(body, dict) and schema.out_schema_history is BasicHistoryLot:
-        return BasicHistoryLot.model_validate(body)
+    if isinstance(body, dict):
+        return _model_for_body(schema, body).model_validate(body)
+    model = schema.out_schema_history or schema.out_schema_default
     return model.model_validate(body)
 
 

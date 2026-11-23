@@ -2,8 +2,7 @@ from datetime import datetime, UTC
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, HttpUrl, model_validator
-from requests.compat import has_simplejson
+from pydantic import BaseModel, Field, HttpUrl, model_serializer, model_validator
 
 from auction_api.utils import AuctionApiUtils
 from core.logger import logger
@@ -70,7 +69,27 @@ class BasicLot(BaseModel):
     seller_type: Optional[str] = None
     manufacturer_country: Optional[str] = None
     vehicle_score: Optional[str] = None
+    # Present on catalog lots. Null stays off current-lot JSON; history lots keep it.
+    sale_count: Optional[int] = None
     form_get_type: FormGetType = Field(default=FormGetType.HISTORY)
+    form_get_type_explicit: bool = Field(default=False, exclude=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def record_explicit_form_get_type(cls, data):
+        if isinstance(data, dict):
+            if "form_get_type_explicit" in data:
+                data["form_get_type_explicit"] = bool(data.get("form_get_type_explicit"))
+            else:
+                data["form_get_type_explicit"] = bool(data.get("form_get_type"))
+        return data
+
+    @model_serializer(mode="wrap")
+    def omit_empty_current_sale_count(self, handler):
+        payload = handler(self)
+        if type(self) is BasicLot and isinstance(payload, dict) and payload.get("sale_count") is None:
+            payload.pop("sale_count", None)
+        return payload
 
     @model_validator(mode='after')
     @classmethod

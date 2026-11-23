@@ -23,8 +23,3 @@ class DBCurrentUpdateIn(DBPaginationBase, DBDateBase):
 
 class DBCurrentDeleteIn(DBDateBase):
     direction: str | None = Field(default=None)
-
-
-class DBHistoryUpdateIn(DBPaginationBase, DBDateBase):
-    period: int | None = Field(default=None)
-    lot_id: int | None = Field(default=None)

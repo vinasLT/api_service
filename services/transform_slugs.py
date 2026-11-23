@@ -4,41 +4,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auction_api.types.search import CurrentSearchParams, HistorySearchParams
 from core.logger import logger
-from database.crud.car_make import MakeService
-from database.crud.car_model import ModelService
-from database.crud.damage import DamageService
-from database.crud.document import DocumentService
-from database.crud.drive import DriveService
-from database.crud.status import StatusService
-from database.crud.transmission import TransmissionService
-from database.crud.vehicle_type import VehicleTypeService
+from database.crud.base import BaseService
+from database.models import Damage, Document, Drive, Make, Model, Status, Transmission, VehicleType
 
 
+_FIELD_MODELS = {
+    'make': Make,
+    'model': Model,
+    'vehicle_type': VehicleType,
+    'transmission': Transmission,
+    'status': Status,
+    'drive': Drive,
+    'damage_pr': Damage,
+    'document': Document,
+}
 
 
 async def transform_slugs(
     data: Union[HistorySearchParams, CurrentSearchParams],
     db: AsyncSession
 ) -> Union[HistorySearchParams, CurrentSearchParams]:
-    field_service_map = {
-        'make': MakeService,
-        'model': ModelService,
-        'vehicle_type': VehicleTypeService,
-        'transmission': TransmissionService,
-        'status': StatusService,
-        'drive': DriveService,
-        'damage_pr': DamageService,
-        'document': DocumentService,
-    }
-
     data_dict = data.model_dump()
 
     for field_name, field_value in data_dict.items():
-        service_class = field_service_map.get(field_name)
-        if not service_class or field_value in (None, '', [], ()):
+        model = _FIELD_MODELS.get(field_name)
+        if model is None or field_value in (None, '', [], ()):
             continue
 
-        service = service_class(db)
+        service = BaseService(model, db)
         is_list = isinstance(field_value, (list, tuple, set))
         values = list(field_value) if is_list else [field_value]
 
@@ -55,9 +48,3 @@ async def transform_slugs(
 
     logger.debug(f"Transformed slugs: {data}")
     return data
-
-
-
-
-
-

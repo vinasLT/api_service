@@ -13,6 +13,7 @@ from services.saved_lots_read import (
     find_saved_lot,
     sales_from_history,
     sales_from_row,
+    store_archival_lots,
 )
 
 sales_history_router = APIRouter()
@@ -36,4 +37,5 @@ async def get_sales_history(
         data,
         ttl=sale_history_ttl,
     )
+    await store_archival_lots(db, result)
     return sales_from_history(result)

@@ -133,6 +133,7 @@ def test_sale_result_columns_survive_feed_upserts():
         "sale_date",
         "purchase_price",
         "sale_history_fetched_at",
+        "sale_count",
     ):
         assert column in upsert.EXCLUDED_COLUMNS
         assert column not in upsert.UPSERT_COLUMNS

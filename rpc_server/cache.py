@@ -31,28 +31,6 @@ class RedisCache:
         except Exception as e:
             logger.warning(f"Redis set error for key {key}: {e}")
 
-    async def delete(self, key: str) -> None:
-        try:
-            await self.client.delete(key)
-        except Exception as e:
-            logger.warning(f"Redis delete error for key {key}: {e}")
-
-    async def delete_pattern(self, pattern: str) -> None:
-        try:
-            cursor = b'0'
-            while cursor:
-                cursor, keys = await self.client.scan(
-                    cursor=cursor,
-                    match=pattern,
-                    count=100
-                )
-                if keys:
-                    await self.client.delete(*keys)
-                if cursor == b'0':
-                    break
-        except Exception as e:
-            logger.warning(f"Redis delete pattern error for {pattern}: {e}")
-
 
 class CacheKeyBuilder:
 

@@ -1,4 +1,3 @@
-import json
 import pandas as pd
 import requests
 import slugify
@@ -12,11 +11,6 @@ def get_json_data_from_api(vehicle_type: str) -> dict:
     }
     response = requests.get(url, headers=headers)
     return response.json()
-
-
-def get_json_data():
-    with open('cars_filters.json') as f:
-        return json.load(f)
 
 
 VEHICLE_TYPES = [
@@ -40,9 +34,6 @@ GET_VALID_FOR_VEHICLE_TYPE = [
     'boat',
     'atv'
 ]
-
-
-validated_makes = {}
 
 
 def get_all_makes(vehicle_type: str):

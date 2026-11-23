@@ -42,20 +42,6 @@ class DirectionEnum(str, Enum):
     ASC = "ASC"
     DESC = "DESC"
 
-class VehicleTypeEnum(str, Enum):
-    AUTOMOBILE = 'automobile'
-    TRUCK = 'truck'
-    TRAILERS = 'trailers'
-    MOTORCYCLE = 'motorcycle'
-    BOAT = 'boat'
-    ATV = 'atv'
-    WATERCRAFT = 'watercraft'
-    BUS = 'bus'
-    INDUSTRIAL_EQUIPMENT = 'industrial_equipment'
-    JET_SKY = 'jet_sky'
-    OTHER = 'other'
-
-
 class SellerTypeEnum(str, Enum):
     INSURANCE = 'insurance'
     DEALER = 'dealer'

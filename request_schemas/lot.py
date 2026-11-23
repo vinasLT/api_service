@@ -2,11 +2,11 @@
 
 from pydantic import BaseModel, Field, RootModel
 
-from auction_api.types.common import SiteIn, DefinedSiteEnum
+from auction_api.types.common import SiteIn, SiteEnum
 
 
 class LotByIDIn(SiteIn):
-    site: DefinedSiteEnum | None = Field(None, description="Auction of vehicle")
+    site: SiteEnum | None = Field(None, description="Auction of vehicle")
     lot_id: int = Field(..., description="Lot id")
 
 

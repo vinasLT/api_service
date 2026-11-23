@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 
-from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +10,7 @@ from jobs.job_runs import STATUS_QUEUED, STATUS_RUNNING, TRIGGER_MANUAL
 from request_schemas.job_runs import JobRunsFilterIn
 
 
-class JobRunsService(BaseService[JobRun, BaseModel, BaseModel]):
+class JobRunsService(BaseService):
     def __init__(self, session: AsyncSession):
         super().__init__(JobRun, session)
 

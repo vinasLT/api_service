@@ -6,10 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.crud.base import BaseService
 from database.models import Make
 from database.models.car_model import Model
-from database.schemas.filters import FilterCreate, FilterUpdate
 
 
-class ModelService(BaseService[Model, FilterCreate, FilterUpdate]):
+class ModelService(BaseService):
     def __init__(self, session: AsyncSession):
         super().__init__(Model, session)
 

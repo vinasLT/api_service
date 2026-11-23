@@ -1,10 +1,9 @@
 from abc import abstractmethod, ABC
-from typing import List, TYPE_CHECKING, Type, TypeVar, Any
+from typing import TYPE_CHECKING, Type, TypeVar, Any
 
 from pydantic import BaseModel
 from rfc9457 import BadRequestProblem, NotFoundProblem
 
-from auction_api.types.common import SiteEnum
 from core.logger import logger, log_async_execution_time
 from services.provider_usage import record_provider_call
 from .types import BaseClientIn
@@ -15,6 +14,32 @@ if TYPE_CHECKING:
 
 
 T = TypeVar("T", bound=BaseModel)
+
+# A lot lookup accepts site=all. The provider call leaves site off so it is not
+# filtered to one auction. Search calls still ask both auctions.
+_ALL_SITE_VALUES = {"all", "3"}
+_OMIT_SITE_ENDPOINTS = {
+    "cars/{lot_id}",
+    "cars/lot-id/web",
+    "cars/current-bid",
+    "sale-histories/lot-id",
+}
+
+
+def provider_params(schema: "EndpointSchema", data: BaseModel) -> dict:
+    payload = data.model_dump(exclude_none=True, mode="json")
+    site_val = payload.get("site")
+    if site_val is None:
+        return payload
+    if str(site_val).lower() not in _ALL_SITE_VALUES:
+        return payload
+    endpoint = getattr(schema.endpoint, "value", schema.endpoint)
+    if endpoint in _OMIT_SITE_ENDPOINTS:
+        payload.pop("site", None)
+    else:
+        payload["site"] = [1, 2]
+    return payload
+
 
 class BaseClient(ABC):
     def __init__(self, data: BaseClientIn):
@@ -47,14 +72,7 @@ class BaseClient(ABC):
     async def request_with_schema(self, schema: "EndpointSchema", data: BaseModel, **kwargs) -> Type[T]:
         url = self._build_url(schema.endpoint.format(**kwargs))
 
-        payload = data.model_dump(exclude_none=True, mode='json')
-
-
-        site_val = payload.get('site')
-        if site_val is not None:
-            normalized = str(site_val).lower()
-            if normalized in {SiteEnum.ALL_NUM, SiteEnum.ALL}:
-                payload['site'] = [1, 2]
+        payload = provider_params(schema, data)
 
         logger.debug(f"Request payload: {payload}, url: {url}, data: {data}")
         endpoint = schema.endpoint.value
@@ -69,13 +87,7 @@ class BaseClient(ABC):
         )
         await record_provider_call(endpoint)
 
-        if schema.method == "GET":
-            response = await self._make_request("GET", url, params=payload)
-        elif schema.method == "POST":
-            response = await self._make_request("POST", url, json=payload)
-        else:
-            logger.error(f"Unsupported method: {schema.method}")
-            raise ValueError(f"Unsupported method: {schema.method}")
+        response = await self._make_request("GET", url, params=payload)
 
         response_data = self._safe_json(response)
         logger.debug(

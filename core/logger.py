@@ -103,47 +103,6 @@ async def async_timer(
         )
 
 
-class AsyncTimer:
-    def __init__(
-            self,
-            process_name: str,
-            logger_instance=None,
-            log_start: bool = False,
-            extra_data: Optional[Dict[str, Any]] = None
-    ):
-        self.process_name = process_name
-        self.logger = logger_instance or logger
-        self.log_start = log_start
-        self.extra_data = extra_data or {}
-        self.start_time = None
-
-    async def __aenter__(self):
-        self.start_time = time.perf_counter()
-        if self.log_start:
-            self.logger.info(f"Starting: {self.process_name}", **self.extra_data)
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        end_time = time.perf_counter()
-        execution_time = end_time - self.start_time
-
-        if exc_type:
-            self.logger.error(
-                f"{self.process_name} failed after {execution_time:.3f} sec: {str(exc_val)}",
-                execution_time=execution_time,
-                process_name=self.process_name,
-                error_type=exc_type.__name__,
-                **self.extra_data
-            )
-        else:
-            self.logger.info(
-                f"{self.process_name} completed in {execution_time:.3f} sec",
-                execution_time=execution_time,
-                process_name=self.process_name,
-                **self.extra_data
-            )
-
-
 def log_async_execution_time(
         process_name: Optional[str] = None,
         logger_instance=None,

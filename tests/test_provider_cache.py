@@ -7,16 +7,22 @@ from rfc9457 import NotFoundProblem
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from auction_api.api import AuctionApiClient
-from auction_api.types.lot import BasicHistoryLot, SaleHistoryItem
+from auction_api.api import AuctionApiClient, Endpoint
+from auction_api.types.lot import BasicHistoryLot, BasicLot, FormGetType, SaleHistoryItem
 from auction_api.types.search import BasicManyHistoryLot
 from database.db.session import get_async_db
 from database.models.saved_lots import SavedLots
 from dependencies.auction_api_service import get_auction_api_service
 from main import app
-from request_schemas.lot import LotByIDIn
+from request_schemas.lot import LotByIDIn, StatisticsData
 from services.http_cache import query_key_builder
-from services.provider_cache import cached_provider_call, sale_history_ttl
+from services.provider_cache import (
+    TTL_CURRENT_LOT,
+    cached_provider_call,
+    catalog_lot_ttl,
+    sale_history_ttl,
+)
+from services.saved_lots_read import find_saved_lot
 from services.provider_usage import read_provider_usage, record_provider_call
 from services.redis_client import set_redis
 
@@ -227,6 +233,67 @@ def test_concurrent_callers_share_one_provider_request(fake_redis):
     assert second.purchase_price == first.purchase_price
 
 
+def test_cached_web_lot_stays_an_active_lot(fake_redis):
+    calls = 0
+
+    class Api:
+        async def request_with_schema(self, schema, data, **kwargs):
+            nonlocal calls
+            calls += 1
+            return AuctionApiClient().process_response(
+                {
+                    "lot_id": 9,
+                    "site": 1,
+                    "vin": "LIVE",
+                    "form_get_type": "active",
+                    "sale_count": 2,
+                },
+                schema,
+            )
+
+    data = LotByIDIn(lot_id=9, site="1")
+
+    async def run():
+        first = await cached_provider_call(
+            Api(), AuctionApiClient.GET_LOT_BY_ID_FOR_WEB, data, ttl=catalog_lot_ttl
+        )
+        second = await cached_provider_call(
+            Api(), AuctionApiClient.GET_LOT_BY_ID_FOR_WEB, data, ttl=catalog_lot_ttl
+        )
+        return first, second
+
+    first, second = asyncio.run(run())
+    assert calls == 1
+    assert type(first) is BasicLot
+    assert type(second) is BasicLot
+    assert second.form_get_type is FormGetType.ACTIVE
+    assert second.form_get_type_explicit is True
+    assert second.sale_count == 2
+
+
+def test_cached_web_lot_keeps_an_implicit_form_get_type(fake_redis):
+    class Api:
+        async def request_with_schema(self, schema, data, **kwargs):
+            return AuctionApiClient().process_response(
+                {"lot_id": 9, "site": 1, "vin": "PLAIN"},
+                schema,
+            )
+
+    data = LotByIDIn(lot_id=9, site="1")
+
+    async def run():
+        await cached_provider_call(
+            Api(), AuctionApiClient.GET_LOT_BY_ID_FOR_WEB, data, ttl=catalog_lot_ttl
+        )
+        return await cached_provider_call(
+            Api(), AuctionApiClient.GET_LOT_BY_ID_FOR_WEB, data, ttl=catalog_lot_ttl
+        )
+
+    lot = asyncio.run(run())
+    assert lot.form_get_type_explicit is False
+    assert catalog_lot_ttl(lot) == TTL_CURRENT_LOT
+
+
 def test_provider_usage_counts_calls(fake_redis):
     async def run():
         await record_provider_call("history-cars")
@@ -262,6 +329,10 @@ def client(fake_redis):
     class Stub(AuctionApiClient):
         async def request_with_schema(self, schema, data, **kwargs):
             calls.append(schema.endpoint.value)
+            if schema.endpoint == Endpoint.AVERAGE_PRICE:
+                return StatisticsData.model_validate(
+                    {"all": {"total": 80, "min": 70, "max": 90, "count": 4}}
+                )
             if schema.is_pagination:
                 return BasicManyHistoryLot(
                     size=10,
@@ -292,7 +363,7 @@ def test_sales_history_and_history_lot_share_one_call(client):
     assert sales.json()[0]["final_bid"] == 50
 
 
-def test_similar_sales_and_prices_share_one_call(client):
+def test_similar_sales_prices_use_statistic(client):
     test_client, calls, _maker = client
     params = {"site": 1, "make": "Ford", "model": "F150", "year": 2018}
     listing = test_client.get("/public/v1/lot/similar-sales", params=params)
@@ -300,8 +371,111 @@ def test_similar_sales_and_prices_share_one_call(client):
 
     assert listing.status_code == 200
     assert prices.status_code == 200
-    assert prices.json()["min_price"] == 80
+    body = prices.json()
+    assert body["min_price"] == 70
+    assert body["avg_price"] == 80.0
+    assert body["max_price"] == 90
+    assert body["processed_lots"] == 4
+    assert calls == ["history-cars", "history-cars/statistic"]
+
+
+def test_similar_prices_without_model_skip_the_provider(client):
+    test_client, calls, _maker = client
+    prices = test_client.get(
+        "/public/v1/lot/similar-sales/prices",
+        params={"site": 1, "make": "Ford"},
+    )
+
+    assert prices.status_code == 200
+    assert prices.json()["processed_lots"] == 0
+    assert calls == []
+
+
+def test_history_listing_clamps_size_to_25(client):
+    test_client, calls, _maker = client
+    seen: list[int | None] = []
+
+    class SizedStub(AuctionApiClient):
+        async def request_with_schema(self, schema, data, **kwargs):
+            calls.append(schema.endpoint.value)
+            seen.append(data.size)
+            return BasicManyHistoryLot(
+                size=25,
+                page=1,
+                pages=1,
+                count=1,
+                data=[_history(price=80)],
+            )
+
+    app.dependency_overrides[get_auction_api_service] = lambda: SizedStub()
+    response = test_client.get("/public/v1/lot/history", params={"site": 1, "size": 30})
+
+    assert response.status_code == 200
+    assert seen == [25]
     assert calls == ["history-cars"]
+
+
+def test_current_lookup_site_all_reaches_the_provider(client):
+    test_client, calls, _maker = client
+    response = test_client.get(
+        "/public/v1/lot/current/vin-or-lot-id",
+        params={"vin_or_lot": "9", "site": "all"},
+    )
+
+    assert response.status_code == 200
+    assert calls == ["cars/lot-id/web"]
+
+
+def test_current_lookup_uses_the_saved_lot(client):
+    test_client, calls, maker = client
+
+    async def seed():
+        async with maker() as session:
+            session.add(SavedLots(lot_id="9", site=1, vin="SAVED", is_deleted=False))
+            await session.commit()
+
+    asyncio.run(seed())
+    response = test_client.get(
+        "/public/v1/lot/current/vin-or-lot-id",
+        params={"vin_or_lot": "9", "site": "1"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["vin"] == "SAVED"
+    assert calls == []
+
+
+def test_history_site_all_uses_the_saved_row(client):
+    test_client, calls, maker = client
+
+    async def seed():
+        async with maker() as session:
+            session.add(
+                SavedLots(
+                    lot_id="9",
+                    site=1,
+                    vin="SAVED",
+                    is_deleted=True,
+                    sale_history_fetched_at=datetime.now(timezone.utc),
+                    sale_status="Sold",
+                    purchase_price=50,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(seed())
+
+    async def saved_for_all_sites():
+        async with maker() as session:
+            row = await find_saved_lot(session, 9, "all")
+            return None if row is None else row.vin
+
+    assert asyncio.run(saved_for_all_sites()) == "SAVED"
+    response = test_client.get("/public/v1/lot/history/lot-id", params={"lot_id": 9})
+
+    assert response.status_code == 200
+    assert response.json()["vin"] == "SAVED"
+    assert calls == []
 
 
 def test_api_robots_disallows_the_public_api():

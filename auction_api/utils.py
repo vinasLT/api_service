@@ -1,8 +1,7 @@
-from datetime import datetime
 from typing import Union, TYPE_CHECKING
 
 from pydantic_core import PydanticCustomError
-from rfc9457 import NotFoundProblem
+from rfc9457 import BadRequestProblem, NotFoundProblem
 
 from auction_api.wmi_country import decode_wmi_country
 from core.logger import logger
@@ -52,20 +51,46 @@ class AuctionApiUtils:
 
 
 async def get_lot_vin_or_lot_id(api: "AuctionApiClient", site: "SiteEnum", vin_or_lot_id: str):
+    """Lot ids use the catalog endpoint. A VIN uses the current endpoint, then all-time on 404."""
+    from services.provider_cache import (
+        TTL_CURRENT_LOT,
+        cached_provider_call,
+        catalog_lot_ttl,
+        sale_history_ttl,
+    )
+
     vin_or_lot = vin_or_lot_id.replace(" ", "").upper()
+    if len(vin_or_lot) > 64:
+        raise BadRequestProblem(detail="Identifier is too long")
     if vin_or_lot.isdigit():
-        try:
-            logger.debug(f'Request routed to get by lot_id - {vin_or_lot}', extra={'site': site, 'vin_or_lot_id': vin_or_lot})
-            in_data = LotByIDIn(site=site, lot_id=int(vin_or_lot))
-            response = await api.request_with_schema(api.GET_LOT_BY_ID_FOR_ALL_TIME, in_data, lot_id=vin_or_lot)
-        except NotFoundProblem:
-            response = None
-    else:
-        logger.debug(f'Request routed to get by vin - {vin_or_lot}',  extra={'site': site, 'vin_or_lot_id': vin_or_lot})
-        in_data = LotByVINIn(vin=vin_or_lot, site=site)
-        response = await api.request_with_schema(api.GET_LOT_BY_VIN_FOR_ALL_TIME, in_data)
-    if not response:
-        in_data = LotByIDIn(site=site, lot_id=int(vin_or_lot))
-        response = await api.request_with_schema(api.GET_LOT_BY_ID_FOR_CURRENT, in_data, lot_id=vin_or_lot)
-    return response
+        logger.debug(
+            f"Request routed to get by lot_id - {vin_or_lot}",
+            extra={"site": site, "vin_or_lot_id": vin_or_lot},
+        )
+        return await cached_provider_call(
+            api,
+            api.GET_LOT_BY_ID_FOR_WEB,
+            LotByIDIn(site=site, lot_id=int(vin_or_lot)),
+            ttl=catalog_lot_ttl,
+        )
+
+    logger.debug(
+        f"Request routed to get by vin - {vin_or_lot}",
+        extra={"site": site, "vin_or_lot_id": vin_or_lot},
+    )
+    # GET /cars/vin accepts vin only. site stays on the all-time fallback.
+    try:
+        return await cached_provider_call(
+            api,
+            api.GET_LOT_BY_VIN_FOR_CURRENT,
+            LotByVINIn(vin=vin_or_lot, site=None),
+            ttl=TTL_CURRENT_LOT,
+        )
+    except NotFoundProblem:
+        return await cached_provider_call(
+            api,
+            api.GET_LOT_BY_VIN_FOR_ALL_TIME,
+            LotByVINIn(vin=vin_or_lot, site=site),
+            ttl=sale_history_ttl,
+        )
 
