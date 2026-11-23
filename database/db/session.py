@@ -10,7 +10,7 @@ if settings.DEBUG:
     SQLALCHEMY_DATABASE_URL = f'sqlite:///{BASE_DIR}/db.sqlite'
 else:
     SQLALCHEMY_ASYNC_DATABASE_URL = f'postgresql+asyncpg://{settings.DB_USER}:{settings.DB_PASS}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}'
-    SQLALCHEMY_DATABASE_URL = f'postgresql://{settings.DB_USER}:{settings.DB_PASS}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}'
+    SQLALCHEMY_DATABASE_URL = f'postgresql+psycopg://{settings.DB_USER}:{settings.DB_PASS}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}'
 
 engine: Engine = create_engine(SQLALCHEMY_DATABASE_URL)
 
