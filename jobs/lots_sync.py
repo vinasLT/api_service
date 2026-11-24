@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from itertools import islice
 
 import httpx
-from sqlalchemy import select, tuple_, update
+from sqlalchemy import and_, or_, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from auction_api.api import AuctionApiClient
@@ -18,6 +18,7 @@ from jobs.locks import SAVED_LOTS_WRITE_LOCK, advisory_lock
 from jobs.saved_lots_upsert import (
     MAX_CONCURRENT_SAVES,
     create_save_engine,
+    feed_revived_keys,
     save_lots,
 )
 from request_schemas.db_save_schemas import DBCurrentDeleteIn, DBCurrentUpdateIn
@@ -25,6 +26,9 @@ from request_schemas.db_save_schemas import DBCurrentDeleteIn, DBCurrentUpdateIn
 PAGE_SIZE = 1000
 MAX_IN_FLIGHT_PAGES = 6
 SQLITE_MAX_BIND_PARAMETERS = 900
+# Each deleted lot is its own OR branch. A few hundred of those overflow
+# PostgreSQL's parser stack (max_stack_depth / StatementTooComplexError).
+DELETE_MARK_BATCH = 40
 # The update feed rejects a date_from older than 3 days. Three calendar days
 # back is already past that limit once the API reads it as midnight.
 UPDATED_LOT_LOOKBACK_DAYS = 2
@@ -46,40 +50,65 @@ async def _fetch_deleted_lots(
     return response.data
 
 
+def _delete_times(lots: Iterable[DBDeleteLot]) -> dict[tuple[str, int], datetime]:
+    """Newest delete-event time for each lot. An older event must not win."""
+    times: dict[tuple[str, int], datetime] = {}
+    for lot in lots:
+        key = (str(lot.lot_id), int(lot.site))
+        current = times.get(key)
+        if current is None or lot.updated_at > current:
+            times[key] = lot.updated_at
+    return times
+
+
 async def _mark_deleted_lots(
     lots: Iterable[DBDeleteLot],
-) -> tuple[set[tuple[str, int]], int]:
-    deleted_keys = {(str(lot.lot_id), lot.site) for lot in lots}
-    if not deleted_keys:
-        return deleted_keys, 0
+) -> tuple[dict[tuple[str, int], datetime], int]:
+    deleted_at_by_key = _delete_times(lots)
+    if not deleted_at_by_key:
+        return deleted_at_by_key, 0
 
     deleted_at = datetime.now(timezone.utc)
-    marked_count = 0
-    deleted_key_iterator = iter(deleted_keys)
+    marked_keys: set[tuple[str, int]] = set()
+    items = list(deleted_at_by_key.items())
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            while batch := list(
-                islice(deleted_key_iterator, SQLITE_MAX_BIND_PARAMETERS // 2)
-            ):
+            for offset in range(0, len(items), DELETE_MARK_BATCH):
+                conditions = []
+                for (lot_id, site), event_at in items[offset : offset + DELETE_MARK_BATCH]:
+                    # A row already refreshed by a later current-feed write stays active.
+                    conditions.append(
+                        and_(
+                            SavedLots.lot_id == lot_id,
+                            SavedLots.site == site,
+                            or_(
+                                SavedLots.updated_at.is_(None),
+                                SavedLots.updated_at <= event_at,
+                            ),
+                        )
+                    )
                 result = await session.execute(
                     update(SavedLots)
-                    .where(
-                        tuple_(SavedLots.lot_id, SavedLots.site).in_(batch),
-                        SavedLots.is_deleted.is_(False),
+                    .where(SavedLots.is_deleted.is_(False), or_(*conditions))
+                    .values(
+                        is_deleted=True,
+                        deleted_at=deleted_at,
+                        # Keep the feed timestamp. The column's onupdate would
+                        # otherwise stamp now and hide a current-feed revive.
+                        updated_at=SavedLots.updated_at,
                     )
-                    .values(is_deleted=True, deleted_at=deleted_at)
+                    .returning(SavedLots.lot_id, SavedLots.site)
                 )
-                marked_count += result.rowcount or 0
-    await _purge_sold_pages(deleted_keys)
-    return deleted_keys, marked_count
+                marked_keys.update((row.lot_id, row.site) for row in result.all())
+    await _purge_sold_pages(marked_keys)
+    return deleted_at_by_key, len(marked_keys)
 
 
 async def _purge_sold_pages(deleted_keys: set[tuple[str, int]]) -> None:
     if not deleted_keys or not cloudflare_configured():
         return
     # A single tuple IN of this size overflows PostgreSQL's parser stack
-    # (max_stack_depth / StatementTooComplexError). Same chunk size as the
-    # delete update above.
+    # (max_stack_depth / StatementTooComplexError).
     rows = []
     deleted_key_iterator = iter(deleted_keys)
     async with AsyncSessionLocal() as session:
@@ -107,9 +136,9 @@ async def _fetch_all_updated_lots(
     api: AuctionApiClient,
     date_from: str,
     date_to: str,
-    deleted_keys: set[tuple[str, int]],
+    deleted_at_by_key: dict[tuple[str, int], datetime],
     save_engine: AsyncEngine,
-) -> tuple[int, int]:
+) -> tuple[int, int, set[tuple[str, int]]]:
     logger.info("Fetching updated lots from {} to {}", date_from, date_to)
 
     request = DBCurrentUpdateIn.model_validate(
@@ -137,6 +166,7 @@ async def _fetch_all_updated_lots(
     fetched_count = 0
     saved_count = 0
     completed_pages = 0
+    revived_keys: set[tuple[str, int]] = set()
 
     async def process_page(page: int, lots: list[DBUpdateLot] | None = None) -> None:
         nonlocal fetched_count, saved_count, completed_pages
@@ -145,8 +175,9 @@ async def _fetch_all_updated_lots(
                 if lots is None:
                     lots = await fetch_page(page)
                 page_fetched = len(lots)
+                page_revived = feed_revived_keys(lots, deleted_at_by_key)
                 async with save_slots:
-                    page_saved = await save_lots(lots, deleted_keys, save_engine)
+                    page_saved = await save_lots(lots, deleted_at_by_key, save_engine)
                 del lots
         except Exception:
             logger.exception("Failed to process updated-lot page {}", page)
@@ -155,6 +186,7 @@ async def _fetch_all_updated_lots(
         async with progress_lock:
             fetched_count += page_fetched
             saved_count += page_saved
+            revived_keys.update(page_revived)
             completed_pages += 1
             if (
                 completed_pages == 1
@@ -181,7 +213,7 @@ async def _fetch_all_updated_lots(
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         raise
-    return fetched_count, saved_count
+    return fetched_count, saved_count, revived_keys
 
 
 async def _sync() -> dict:
@@ -201,7 +233,7 @@ async def _sync() -> dict:
             api._http_client = http_client
 
             deleted_lots = await _fetch_deleted_lots(api, deleted_from, deleted_to)
-            deleted_keys, marked_count = await _mark_deleted_lots(deleted_lots)
+            deleted_at_by_key, marked_count = await _mark_deleted_lots(deleted_lots)
             logger.info(
                 "Processed {} deleted-lot records; marked {} saved lots as deleted",
                 len(deleted_lots),
@@ -209,12 +241,14 @@ async def _sync() -> dict:
             )
             del deleted_lots
 
-            fetched_count, saved_count = await _fetch_all_updated_lots(
-                api, updated_from, updated_to, deleted_keys, save_engine
+            fetched_count, saved_count, revived_keys = await _fetch_all_updated_lots(
+                api, updated_from, updated_to, deleted_at_by_key, save_engine
             )
+            # The delete pass may have purged a lot that this run put back on sale.
+            await _purge_sold_pages(revived_keys)
             return {
                 "deleted_count": marked_count,
-                "deleted_keys_count": len(deleted_keys),
+                "deleted_keys_count": len(deleted_at_by_key),
                 "fetched_count": fetched_count,
                 "saved_count": saved_count,
             }
