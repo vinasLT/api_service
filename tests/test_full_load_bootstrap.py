@@ -16,7 +16,7 @@ def lock_always_free(monkeypatch):
     monkeypatch.setattr(full_load, "advisory_lock", free_lock)
 
 
-async def _fail_load(replace: bool):
+async def _fail_load(replace: bool, undelete: bool = False):
     raise AssertionError("full load must not run")
 
 
@@ -45,8 +45,8 @@ def test_bootstrap_loads_with_replace_when_empty(monkeypatch):
     async def empty():
         return False
 
-    async def load(replace: bool):
-        calls.append(replace)
+    async def load(replace: bool, undelete: bool = False):
+        calls.append((replace, undelete))
         return 2, 100, 100
 
     monkeypatch.setattr(full_load, "has_saved_lots", empty)
@@ -55,7 +55,7 @@ def test_bootstrap_loads_with_replace_when_empty(monkeypatch):
 
     result = asyncio.run(full_load.run(FullLoadMode.BOOTSTRAP))
 
-    assert calls == [True]
+    assert calls == [(True, False)]
     assert result["added_count"] == 100
     assert result["within_threshold"] is True
 
@@ -63,8 +63,8 @@ def test_bootstrap_loads_with_replace_when_empty(monkeypatch):
 def test_verify_never_replaces_and_reports_gap(monkeypatch):
     calls = []
 
-    async def load(replace: bool):
-        calls.append(replace)
+    async def load(replace: bool, undelete: bool = False):
+        calls.append((replace, undelete))
         return 1, 1000, 30
 
     monkeypatch.setattr(full_load, "_load", load)
@@ -72,7 +72,7 @@ def test_verify_never_replaces_and_reports_gap(monkeypatch):
 
     result = asyncio.run(full_load.run(FullLoadMode.VERIFY))
 
-    assert calls == [False]
+    assert calls == [(False, True)]
     assert result["added_count"] == 20
     assert result["feed_vs_db_diff_percent"] == 10.0
     assert result["within_threshold"] is False

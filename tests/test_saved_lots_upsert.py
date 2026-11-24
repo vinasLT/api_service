@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import event, select
+from sqlalchemy import event, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import jobs.lots_sync as lots_sync
@@ -61,22 +61,147 @@ def test_save_lots_inserts_and_skips_stale_updates(db):
     assert row.is_deleted is False
 
 
-def test_deleted_lots_are_not_resurrected_without_replace(db):
+def test_newer_update_revives_a_deleted_lot_without_a_delete_event(db):
     engine, session_factory = db
+    key = ("2", 2)
     asyncio.run(
         upsert.save_lots([DBUpdateLot(lot_id=2, site=2, updated_at=OLD)], engine=engine)
     )
     deleted = DBDeleteLot(id="x", lot_id=2, site=2, created_at=OLD, updated_at=NEW)
     _, marked = asyncio.run(lots_sync._mark_deleted_lots([deleted]))
     assert marked == 1
+    assert _rows(session_factory)[key].is_deleted is True
 
-    newer = DBUpdateLot(lot_id=2, site=2, vin="AGAIN", updated_at=NEW)
-    assert asyncio.run(upsert.save_lots([newer], engine=engine)) == 0
-    assert _rows(session_factory)[("2", 2)].is_deleted is True
+    later = DBUpdateLot(lot_id=2, site=2, vin="AGAIN", updated_at=NEW)
+    assert asyncio.run(upsert.save_lots([later], engine=engine)) == 1
+    row = _rows(session_factory)[key]
+    assert (row.is_deleted, row.vin, row.deleted_at) == (False, "AGAIN", None)
 
-    assert asyncio.run(upsert.save_lots([newer], engine=engine, replace=True)) == 1
-    row = _rows(session_factory)[("2", 2)]
-    assert (row.is_deleted, row.vin) == (False, "AGAIN")
+
+def test_equal_update_revives_only_when_it_is_not_older_than_the_delete(db):
+    engine, session_factory = db
+    key = ("6", 1)
+    asyncio.run(
+        upsert.save_lots(
+            [DBUpdateLot(lot_id=6, site=1, vin="KEEP", updated_at=NEW)], engine=engine
+        )
+    )
+    deleted = DBDeleteLot(id="x", lot_id=6, site=1, created_at=OLD, updated_at=NEW)
+    _, marked = asyncio.run(lots_sync._mark_deleted_lots([deleted]))
+    assert marked == 1
+
+    same_age = DBUpdateLot(lot_id=6, site=1, vin="AGAIN", updated_at=NEW)
+    assert asyncio.run(upsert.save_lots([same_age], engine=engine)) == 0
+    assert _rows(session_factory)[key].is_deleted is True
+    assert _rows(session_factory)[key].vin == "KEEP"
+
+    assert asyncio.run(upsert.save_lots([same_age], {key: NEW}, engine=engine)) == 1
+    row = _rows(session_factory)[key]
+    assert (row.is_deleted, row.vin, row.deleted_at) == (False, "AGAIN", None)
+
+
+def test_older_update_does_not_revive_a_deleted_lot(db):
+    engine, session_factory = db
+    key = ("3", 1)
+    asyncio.run(
+        upsert.save_lots(
+            [DBUpdateLot(lot_id=3, site=1, vin="KEEP", updated_at=OLD)], engine=engine
+        )
+    )
+    deleted = DBDeleteLot(id="x", lot_id=3, site=1, created_at=OLD, updated_at=NEW)
+    _, marked = asyncio.run(lots_sync._mark_deleted_lots([deleted]))
+    assert marked == 1
+
+    older = DBUpdateLot(lot_id=3, site=1, vin="STALE", updated_at=OLD)
+    assert asyncio.run(upsert.save_lots([older], {key: NEW}, engine=engine)) == 0
+    row = _rows(session_factory)[key]
+    assert row.is_deleted is True
+    assert row.vin == "KEEP"
+
+    replacement = DBUpdateLot(lot_id=3, site=1, vin="BOOT", updated_at=NEW)
+    assert asyncio.run(upsert.save_lots([replacement], engine=engine, replace=True)) == 1
+    replaced = _rows(session_factory)[key]
+    assert (replaced.is_deleted, replaced.vin) == (False, "BOOT")
+
+
+def test_delete_older_than_the_stored_row_does_not_mark_it_deleted(db):
+    engine, session_factory = db
+    asyncio.run(
+        upsert.save_lots(
+            [DBUpdateLot(lot_id=4, site=1, vin="LIVE", updated_at=NEW)], engine=engine
+        )
+    )
+    deleted = DBDeleteLot(id="x", lot_id=4, site=1, created_at=OLD, updated_at=OLD)
+    _, marked = asyncio.run(lots_sync._mark_deleted_lots([deleted]))
+
+    row = _rows(session_factory)[("4", 1)]
+    assert marked == 0
+    assert row.is_deleted is False
+    assert row.vin == "LIVE"
+
+
+def _set_sale_status(session_factory, key: tuple[str, int], status: str) -> None:
+    lot_id, site = key
+
+    async def run():
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    update(SavedLots)
+                    .where(SavedLots.lot_id == lot_id, SavedLots.site == site)
+                    .values(sale_status=status, updated_at=SavedLots.updated_at)
+                )
+
+    asyncio.run(run())
+
+
+def test_sold_lot_stays_deleted_when_the_current_feed_lists_it(db):
+    engine, session_factory = db
+    key = ("7", 1)
+    asyncio.run(
+        upsert.save_lots(
+            [DBUpdateLot(lot_id=7, site=1, vin="SOLD", updated_at=OLD)], engine=engine
+        )
+    )
+    _set_sale_status(session_factory, key, "Sold")
+    deleted = DBDeleteLot(id="x", lot_id=7, site=1, created_at=OLD, updated_at=NEW)
+    _, marked = asyncio.run(lots_sync._mark_deleted_lots([deleted]))
+    assert marked == 1
+
+    later = DBUpdateLot(lot_id=7, site=1, vin="BACK", updated_at=NEW)
+    assert asyncio.run(upsert.save_lots([later], engine=engine)) == 0
+    assert asyncio.run(upsert.save_lots([later], {key: NEW}, engine=engine)) == 0
+    assert asyncio.run(upsert.save_lots([later], engine=engine, undelete=True)) == 0
+
+    row = _rows(session_factory)[key]
+    assert row.is_deleted is True
+    assert row.sale_status == "Sold"
+    assert row.vin == "SOLD"
+
+
+def test_undelete_restores_a_catalog_lot_without_rewriting_a_newer_body(db):
+    engine, session_factory = db
+    key = ("5", 1)
+    asyncio.run(
+        upsert.save_lots(
+            [DBUpdateLot(lot_id=5, site=1, vin="CURRENT", updated_at=NEW)],
+            engine=engine,
+        )
+    )
+    deleted = DBDeleteLot(id="x", lot_id=5, site=1, created_at=NEW, updated_at=NEW)
+    _, marked = asyncio.run(lots_sync._mark_deleted_lots([deleted]))
+    assert marked == 1
+
+    same_age = DBUpdateLot(lot_id=5, site=1, vin="STALE", updated_at=NEW)
+    assert asyncio.run(upsert.save_lots([same_age], engine=engine, undelete=True)) == 1
+    row = _rows(session_factory)[key]
+    assert row.is_deleted is False
+    assert row.deleted_at is None
+    assert row.vin == "CURRENT"
+
+    newer = DBUpdateLot(lot_id=5, site=1, vin="FRESH", updated_at=datetime(2026, 12, 1, tzinfo=timezone.utc))
+    assert asyncio.run(upsert.save_lots([newer], engine=engine, undelete=True)) == 1
+    assert _rows(session_factory)[key].vin == "FRESH"
 
 
 def test_purge_sold_pages_queries_keys_in_batches(db, monkeypatch):
@@ -137,8 +262,20 @@ def test_sale_result_columns_survive_feed_upserts():
     ):
         assert column in upsert.EXCLUDED_COLUMNS
         assert column not in upsert.UPSERT_COLUMNS
-    assert "sale_history" not in upsert._merge_sql(replace=True)
-    assert "sale_history" not in upsert._merge_sql(replace=False)
+    for sql in (
+        upsert._merge_sql(replace=True),
+        upsert._merge_sql(replace=False),
+        upsert._merge_sql(replace=False, revive=True),
+        upsert._merge_sql(replace=False, undelete=True),
+    ):
+        for column in (
+            "sale_history",
+            "sale_date",
+            "purchase_price",
+            "sale_history_fetched_at",
+            "sale_count",
+        ):
+            assert f'EXCLUDED."{column}"' not in sql
 
 
 def test_records_from_api_items_keeps_newest_per_lot():

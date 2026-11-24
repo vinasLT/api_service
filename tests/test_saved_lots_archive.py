@@ -10,7 +10,12 @@ from auction_api.api import AuctionApiClient
 from auction_api.types.db_lot import DBUpdateLot
 from auction_api.types.lot import BasicHistoryLot, BasicLot, FormGetType, SaleHistoryItem
 from database.models import Base, SavedLots
-from services.saved_lots_read import store_archival_lots, store_catalog_lot
+from services.saved_lots_read import (
+    sales_from_row,
+    saved_lot_to_model,
+    store_archival_lots,
+    store_catalog_lot,
+)
 
 FUTURE = datetime(2099, 1, 1, tzinfo=timezone.utc)
 NEW = datetime(2026, 11, 1, tzinfo=timezone.utc)
@@ -237,6 +242,86 @@ def test_store_failure_is_swallowed(monkeypatch):
     monkeypatch.setattr("services.saved_lots_read.find_saved_lot", boom)
     asyncio.run(store_archival_lots(session, BasicHistoryLot(lot_id=1, site=1, vin="X")))
     assert session.rolled_back is True
+
+
+def test_active_buy_now_with_a_not_sold_attempt_stays_active():
+    past = datetime(2026, 11, 23, 19, 16, tzinfo=timezone.utc)
+    history = [
+        {
+            "lot_id": 67009726,
+            "site": 1,
+            "sale_status": "Not sold",
+            "sale_date": past.isoformat(),
+            "purchase_price": 5000,
+            "is_buynow": False,
+        }
+    ]
+    row = SavedLots(
+        lot_id="67009726",
+        site=1,
+        is_buynow=True,
+        price_new=8200,
+        current_bid=575,
+        auction_date=past,
+        is_deleted=False,
+        sale_status="Not sold",
+        sale_date=past,
+        purchase_price=5000,
+        sale_history=history,
+    )
+
+    lot = saved_lot_to_model(row)
+
+    assert lot.form_get_type is FormGetType.ACTIVE
+    assert lot.is_buynow is True
+    assert lot.price_new == 8200
+    assert lot.auction_date == past
+    assert lot.sale_status is None
+    assert lot.sale_date is None
+    assert lot.purchase_price is None
+    sales = sales_from_row(row)
+    assert [(sale.status, sale.final_bid) for sale in sales] == [("Not sold", 5000)]
+
+
+def test_active_sold_row_keeps_its_sale_result():
+    past = datetime(2026, 11, 23, 19, 16, tzinfo=timezone.utc)
+    row = SavedLots(
+        lot_id="8",
+        site=1,
+        auction_date=past,
+        is_deleted=False,
+        sale_status="Sold",
+        sale_date=past,
+        purchase_price=5000,
+    )
+
+    lot = saved_lot_to_model(row)
+
+    assert lot.form_get_type is FormGetType.ACTIVE
+    assert lot.sale_status == "Sold"
+    assert lot.sale_date == past
+    assert lot.purchase_price == 5000
+
+
+def test_deleted_row_stays_history_with_its_sale_result():
+    past = datetime(2026, 11, 23, 19, 16, tzinfo=timezone.utc)
+    row = SavedLots(
+        lot_id="9",
+        site=1,
+        auction_date=past,
+        is_deleted=True,
+        sale_status="Sold",
+        sale_date=past,
+        purchase_price=5000,
+    )
+
+    lot = saved_lot_to_model(row)
+
+    assert lot.form_get_type is FormGetType.HISTORY
+    assert lot.auction_date is None
+    assert lot.sale_status == "Sold"
+    assert lot.sale_date == past
+    assert lot.purchase_price == 5000
 
 
 def test_sale_count_is_absent_from_current_lot_merge_sql():

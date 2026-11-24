@@ -13,7 +13,9 @@ from sqlalchemy import (
     Float,
     Integer,
     and_,
+    case,
     false,
+    func,
     null,
     or_,
     text,
@@ -104,31 +106,99 @@ def _select_expr(name: str, column) -> str:
     return quoted
 
 
-def _merge_sql(replace: bool) -> str:
+def _newer_than_stored(table: str) -> str:
+    return f"""(
+    EXCLUDED.updated_at IS NULL
+    OR {table}.updated_at IS NULL
+    OR EXCLUDED.updated_at > {table}.updated_at
+)"""
+
+
+def _not_sold_sql(table: str) -> str:
+    status = f"{table}.{_quote_identifier('sale_status')}"
+    return f"coalesce(lower(trim({status})), '') <> 'sold'"
+
+
+def _keep_sold_archived_sql(table: str) -> list[str]:
+    """Clear is_deleted unless the stored sale is a completed sale."""
+    not_sold = _not_sold_sql(table)
+    deleted = _quote_identifier("is_deleted")
+    deleted_at = _quote_identifier("deleted_at")
+    return [
+        f"{deleted} = CASE WHEN {not_sold} THEN FALSE ELSE {table}.{deleted} END",
+        (
+            f"{deleted_at} = CASE WHEN {not_sold} THEN NULL "
+            f"ELSE {table}.{deleted_at} END"
+        ),
+    ]
+
+
+def _merge_sql(
+    replace: bool, *, revive: bool = False, undelete: bool = False
+) -> str:
+    if sum(bool(flag) for flag in (replace, revive, undelete)) > 1:
+        raise ValueError("lot merge accepts only one of replace, revive, undelete")
     columns_by_name = {column.name: column for column in SavedLots.__table__.columns}
     insert_columns = [*UPSERT_COLUMNS, "is_deleted"]
     select_exprs = [
         _select_expr(name, columns_by_name[name]) for name in UPSERT_COLUMNS
     ]
     select_exprs.append("FALSE")
-    assignments = [
+    table = _quote_identifier(SavedLots.__tablename__)
+    body_assignments = [
         f"{_quote_identifier(name)} = EXCLUDED.{_quote_identifier(name)}"
         for name in UPSERT_COLUMNS
         if name not in {"lot_id", "site"}
     ]
-    table = _quote_identifier(SavedLots.__tablename__)
+    clear_deleted = [
+        f"{_quote_identifier('is_deleted')} = FALSE",
+        f"{_quote_identifier('deleted_at')} = NULL",
+    ]
+    keep_sold_archived = _keep_sold_archived_sql(table)
+    not_sold = _not_sold_sql(table)
+    newer = _newer_than_stored(table)
     if replace:
-        assignments.append(f"{_quote_identifier('is_deleted')} = FALSE")
-        assignments.append(f"{_quote_identifier('deleted_at')} = NULL")
+        assignments = [*body_assignments, *clear_deleted]
         conflict_filter = ""
-    else:
+    elif revive:
+        # Same age as the delete event still counts. A stored "Sold" result stays archived.
+        assignments = [*body_assignments, *keep_sold_archived]
         conflict_filter = f"""
-WHERE {table}.is_deleted IS FALSE
+WHERE {not_sold}
   AND (
     EXCLUDED.updated_at IS NULL
     OR {table}.updated_at IS NULL
-    OR EXCLUDED.updated_at > {table}.updated_at
+    OR EXCLUDED.updated_at >= {table}.updated_at
   )
+"""
+    elif undelete:
+        # A lot still present in the current catalog is active again, unless it
+        # already has a completed sale. Copy feed columns only when they are
+        # newer, so an unchanged timestamp still clears is_deleted.
+        assignments = [
+            (
+                f"{_quote_identifier(name)} = CASE WHEN {newer} "
+                f"THEN EXCLUDED.{_quote_identifier(name)} "
+                f"ELSE {table}.{_quote_identifier(name)} END"
+            )
+            for name in UPSERT_COLUMNS
+            if name not in {"lot_id", "site"}
+        ]
+        assignments.extend(keep_sold_archived)
+        conflict_filter = f"""
+WHERE ({table}.is_deleted IS TRUE AND {not_sold})
+   OR ({table}.is_deleted IS FALSE AND {newer})
+"""
+    else:
+        # A newer current-feed row revives a deleted lot after its delete event
+        # has left the lookback window. Sold rows stay deleted.
+        assignments = [*body_assignments, *keep_sold_archived]
+        conflict_filter = f"""
+WHERE (
+    {table}.is_deleted IS FALSE
+    OR {not_sold}
+)
+  AND {newer}
 """
     return f"""
 INSERT INTO {table} (
@@ -150,6 +220,8 @@ CREATE TEMP TABLE {_STAGE_TABLE} (
 """
 _MERGE_SQL = _merge_sql(replace=False)
 _MERGE_REPLACE_SQL = _merge_sql(replace=True)
+_MERGE_REVIVE_SQL = _merge_sql(replace=False, revive=True)
+_MERGE_UNDELETE_SQL = _merge_sql(replace=False, undelete=True)
 
 
 def _command_count(status: str) -> int:
@@ -214,28 +286,75 @@ def _prefer_incoming(current: dict[str, Any], incoming: dict[str, Any]) -> bool:
     return incoming_updated >= current_updated
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _update_beats_delete(
+    update_at: datetime | None, delete_at: datetime | None
+) -> bool:
+    """A current-feed row wins when it is the same age as the delete event or newer."""
+    update_at = _as_utc(update_at)
+    delete_at = _as_utc(delete_at)
+    if update_at is None or delete_at is None:
+        return True
+    return update_at >= delete_at
+
+
+def _lot_key(lot_id: Any, site: Any) -> tuple[str, int]:
+    return (str(lot_id), int(site))
+
+
+def feed_revived_keys(
+    lots: Iterable[DBUpdateLot],
+    deleted_at_by_key: dict[tuple[str, int], datetime],
+) -> set[tuple[str, int]]:
+    revived: set[tuple[str, int]] = set()
+    if not deleted_at_by_key:
+        return revived
+    for lot in lots:
+        if lot.lot_id is None or lot.site is None:
+            continue
+        key = _lot_key(lot.lot_id, lot.site)
+        delete_at = deleted_at_by_key.get(key)
+        if delete_at is not None and _update_beats_delete(lot.updated_at, delete_at):
+            revived.add(key)
+    return revived
+
+
 def _lot_rows(
     lots: Iterable[DBUpdateLot],
-    deleted_keys: set[tuple[str, int]],
-) -> list[dict[str, Any]]:
+    deleted_at_by_key: dict[tuple[str, int], datetime],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rows_by_key: dict[tuple[str, int], dict[str, Any]] = {}
     for lot in lots:
         values = _prepare_lot_values(lot)
         key = (values["lot_id"], values["site"])
-        if key in deleted_keys:
-            continue
         current = rows_by_key.get(key)
         if current is None or _prefer_incoming(current, values):
             rows_by_key[key] = values
 
     written_at = datetime.now(timezone.utc)
-    rows = []
+    normal: list[dict[str, Any]] = []
+    revive: list[dict[str, Any]] = []
     for key in sorted(rows_by_key):
         values = rows_by_key[key]
         if values.get("updated_at") is None:
             values["updated_at"] = written_at
-        rows.append(values)
-    return rows
+        delete_at = deleted_at_by_key.get(key)
+        if delete_at is not None and not _update_beats_delete(
+            values.get("updated_at"), delete_at
+        ):
+            continue
+        if delete_at is not None:
+            revive.append(values)
+        else:
+            normal.append(values)
+    return normal, revive
 
 
 def _prefer_updated(current: str | None, incoming: str | None) -> bool:
@@ -322,12 +441,24 @@ async def _asyncpg_connection(conn):
     return driver
 
 
+def _merge_statement(replace: bool, revive: bool, undelete: bool) -> str:
+    if replace:
+        return _MERGE_REPLACE_SQL
+    if revive:
+        return _MERGE_REVIVE_SQL
+    if undelete:
+        return _MERGE_UNDELETE_SQL
+    return _MERGE_SQL
+
+
 async def _copy_merge(
     engine: AsyncEngine,
     records: list[tuple[Any, ...]],
     replace: bool,
+    revive: bool = False,
+    undelete: bool = False,
 ) -> int:
-    merge_sql = _MERGE_REPLACE_SQL if replace else _MERGE_SQL
+    merge_sql = _merge_statement(replace, revive, undelete)
     async with engine.begin() as conn:
         await conn.execute(text(_DROP_STAGE_SQL))
         await conn.execute(text(_CREATE_STAGE_SQL))
@@ -407,9 +538,11 @@ async def _save_lots_postgres(
     engine: AsyncEngine,
     rows: list[dict[str, Any]],
     replace: bool,
+    revive: bool = False,
+    undelete: bool = False,
 ) -> int:
     records = [_postgres_record(row) for row in rows]
-    return await _copy_merge(engine, records, replace)
+    return await _copy_merge(engine, records, replace, revive, undelete)
 
 
 async def save_lot_records(
@@ -417,6 +550,7 @@ async def save_lot_records(
     engine: AsyncEngine | None = None,
     *,
     replace: bool = True,
+    undelete: bool = False,
 ) -> int:
     if not records:
         return 0
@@ -428,7 +562,9 @@ async def save_lot_records(
     while True:
         attempt += 1
         try:
-            saved = await _copy_merge(db_engine, records, replace)
+            saved = await _copy_merge(
+                db_engine, records, replace, undelete=undelete
+            )
         except (LockNotAvailableError, DeadlockDetectedError) as exc:
             if attempt == SAVE_ATTEMPTS:
                 raise
@@ -448,7 +584,40 @@ async def save_lot_records(
         return saved
 
 
-async def _save_lots_sqlite(rows: list[dict[str, Any]], replace: bool) -> int:
+def _sqlite_timestamp_is_newer(statement):
+    return or_(
+        statement.excluded.updated_at.is_(None),
+        SavedLots.updated_at.is_(None),
+        statement.excluded.updated_at > SavedLots.updated_at,
+    )
+
+
+def _sqlite_timestamp_is_not_older(statement):
+    return or_(
+        statement.excluded.updated_at.is_(None),
+        SavedLots.updated_at.is_(None),
+        statement.excluded.updated_at >= SavedLots.updated_at,
+    )
+
+
+def _sqlite_not_sold():
+    return func.coalesce(func.lower(func.trim(SavedLots.sale_status)), "") != "sold"
+
+
+def _sqlite_keep_sold_archived() -> dict[str, Any]:
+    not_sold = _sqlite_not_sold()
+    return {
+        "is_deleted": case((not_sold, false()), else_=SavedLots.is_deleted),
+        "deleted_at": case((not_sold, null()), else_=SavedLots.deleted_at),
+    }
+
+
+async def _save_lots_sqlite(
+    rows: list[dict[str, Any]],
+    replace: bool,
+    revive: bool = False,
+    undelete: bool = False,
+) -> int:
     columns = (*UPSERT_COLUMNS, "is_deleted")
     batch_size = max(1, SQLITE_MAX_BIND_PARAMETERS // len(columns))
     saved_count = 0
@@ -473,17 +642,43 @@ async def _save_lots_sqlite(rows: list[dict[str, Any]], replace: bool) -> int:
                         index_elements=[SavedLots.lot_id, SavedLots.site],
                         set_=update_values,
                     )
-                else:
+                elif revive:
+                    update_values.update(_sqlite_keep_sold_archived())
                     statement = statement.on_conflict_do_update(
                         index_elements=[SavedLots.lot_id, SavedLots.site],
                         set_=update_values,
                         where=and_(
-                            SavedLots.is_deleted.is_(False),
-                            or_(
-                                statement.excluded.updated_at.is_(None),
-                                SavedLots.updated_at.is_(None),
-                                statement.excluded.updated_at > SavedLots.updated_at,
-                            ),
+                            _sqlite_not_sold(),
+                            _sqlite_timestamp_is_not_older(statement),
+                        ),
+                    )
+                elif undelete:
+                    newer = _sqlite_timestamp_is_newer(statement)
+                    kept_values = {
+                        column: case(
+                            (newer, statement.excluded[column]),
+                            else_=getattr(SavedLots, column),
+                        )
+                        for column in UPSERT_COLUMNS
+                        if column not in {"lot_id", "site"}
+                    }
+                    kept_values.update(_sqlite_keep_sold_archived())
+                    statement = statement.on_conflict_do_update(
+                        index_elements=[SavedLots.lot_id, SavedLots.site],
+                        set_=kept_values,
+                        where=or_(
+                            and_(SavedLots.is_deleted.is_(True), _sqlite_not_sold()),
+                            and_(SavedLots.is_deleted.is_(False), newer),
+                        ),
+                    )
+                else:
+                    update_values.update(_sqlite_keep_sold_archived())
+                    statement = statement.on_conflict_do_update(
+                        index_elements=[SavedLots.lot_id, SavedLots.site],
+                        set_=update_values,
+                        where=and_(
+                            or_(SavedLots.is_deleted.is_(False), _sqlite_not_sold()),
+                            _sqlite_timestamp_is_newer(statement),
                         ),
                     )
                 result = await session.execute(statement)
@@ -492,21 +687,39 @@ async def _save_lots_sqlite(rows: list[dict[str, Any]], replace: bool) -> int:
     return saved_count
 
 
+async def _write_rows(
+    rows: list[dict[str, Any]],
+    engine: AsyncEngine,
+    *,
+    replace: bool = False,
+    revive: bool = False,
+    undelete: bool = False,
+) -> int:
+    if not rows:
+        return 0
+    dialect_name = engine.dialect.name
+    if dialect_name == "postgresql":
+        return await _save_lots_postgres(engine, rows, replace, revive, undelete)
+    if dialect_name == "sqlite":
+        return await _save_lots_sqlite(rows, replace, revive, undelete)
+    raise RuntimeError(f"Unsupported database dialect for lot upsert: {dialect_name}")
+
+
 async def save_lots(
     lots: Iterable[DBUpdateLot],
-    deleted_keys: set[tuple[str, int]] | None = None,
+    deleted_at_by_key: dict[tuple[str, int], datetime] | None = None,
     engine: AsyncEngine | None = None,
     *,
     replace: bool = False,
+    undelete: bool = False,
 ) -> int:
-    rows = _lot_rows(lots, deleted_keys or set())
-    if not rows:
-        return 0
-
+    deleted_at_by_key = {} if replace or undelete else (deleted_at_by_key or {})
+    normal, revive = _lot_rows(lots, deleted_at_by_key)
     db_engine = engine or engine_async
-    dialect_name = db_engine.dialect.name
-    if dialect_name == "postgresql":
-        return await _save_lots_postgres(db_engine, rows, replace)
-    if dialect_name == "sqlite":
-        return await _save_lots_sqlite(rows, replace)
-    raise RuntimeError(f"Unsupported database dialect for lot upsert: {dialect_name}")
+    if replace:
+        return await _write_rows(normal + revive, db_engine, replace=True)
+    if undelete:
+        return await _write_rows(normal + revive, db_engine, undelete=True)
+    saved = await _write_rows(normal, db_engine)
+    saved += await _write_rows(revive, db_engine, revive=True)
+    return saved

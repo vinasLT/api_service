@@ -76,6 +76,16 @@ async def find_saved_vin_or_lot(
     return rows
 
 
+# A live listing keeps its failed-auction record in sale_history. These three
+# fields are the terminal sale result. Omit them on an active row unless the
+# stored status is a completed sale.
+_ACTIVE_OMIT_FIELDS = ("sale_status", "sale_date", "purchase_price")
+
+
+def _is_sold_status(value: object) -> bool:
+    return isinstance(value, str) and value.strip().lower() == "sold"
+
+
 def saved_lot_to_model(row: SavedLots) -> BasicHistoryLot:
     payload = {}
     for name in BasicHistoryLot.model_fields:
@@ -93,6 +103,9 @@ def saved_lot_to_model(row: SavedLots) -> BasicHistoryLot:
     )
     if row.is_deleted:
         payload.pop("auction_date", None)
+    elif not _is_sold_status(payload.get("sale_status")):
+        for name in _ACTIVE_OMIT_FIELDS:
+            payload.pop(name, None)
 
     try:
         lot = BasicHistoryLot.model_validate(payload)
@@ -101,8 +114,9 @@ def saved_lot_to_model(row: SavedLots) -> BasicHistoryLot:
             payload.pop(name, None)
         lot = BasicHistoryLot.model_validate(payload)
 
-    if row.is_deleted:
-        lot.form_get_type = FormGetType.HISTORY
+    # A past auction date or a "Not sold" sale_date must not archive a row
+    # the current catalog still has.
+    lot.form_get_type = FormGetType.HISTORY if row.is_deleted else FormGetType.ACTIVE
     return lot
 
 

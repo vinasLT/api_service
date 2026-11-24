@@ -31,7 +31,8 @@ LOTS_VERIFY_MAX_DIFF_PERCENT = 5.0
 class FullLoadMode(str, Enum):
     # Empty table only: load everything and overwrite rows.
     BOOTSTRAP = "bootstrap"
-    # Weekly check: add missing lots, update stale ones, never undelete.
+    # Weekly check: add missing lots, update stale ones, and clear is_deleted
+    # for every lot still present in the current catalog.
     VERIFY = "verify"
 
 
@@ -125,6 +126,7 @@ async def _fetch_all_lots(
     client: httpx.AsyncClient,
     save_engine: AsyncEngine,
     replace: bool,
+    undelete: bool,
 ) -> tuple[int, int, int]:
     logger.info("Fetching all lots")
     try:
@@ -196,7 +198,9 @@ async def _fetch_all_lots(
     async def save_page(page: int, records: list[tuple[Any, ...]]) -> tuple[int, float]:
         logger.debug("Saving all-lot page {} ({} records)", page, len(records))
         started_at = time.perf_counter()
-        saved = await save_lot_records(records, save_engine, replace=replace)
+        saved = await save_lot_records(
+            records, save_engine, replace=replace, undelete=undelete
+        )
         return saved, time.perf_counter() - started_at
 
     async def record_progress(
@@ -293,7 +297,7 @@ async def _fetch_all_lots(
     return total_pages, fetched_count, saved_count
 
 
-async def _load(replace: bool) -> tuple[int, int, int]:
+async def _load(replace: bool, undelete: bool = False) -> tuple[int, int, int]:
     save_engine = create_save_engine(pool_size=WORKERS)
     try:
         try:
@@ -310,7 +314,7 @@ async def _load(replace: bool) -> tuple[int, int, int]:
             ),
         ) as http_client:
             return await _fetch_all_lots(
-                AuctionApiClient(), http_client, save_engine, replace
+                AuctionApiClient(), http_client, save_engine, replace, undelete
             )
     finally:
         await save_engine.dispose()
@@ -350,7 +354,8 @@ async def run(mode: FullLoadMode) -> dict:
             extra={"mode": mode.value, "active_before": active_before},
         )
         pages, fetched_count, saved_count = await _load(
-            replace=mode is FullLoadMode.BOOTSTRAP
+            replace=mode is FullLoadMode.BOOTSTRAP,
+            undelete=mode is FullLoadMode.VERIFY,
         )
         summary = {
             "mode": mode.value,
