@@ -13,7 +13,7 @@ from xml.sax.saxutils import escape
 
 import boto3
 from botocore.exceptions import ClientError
-from sqlalchemy import Row, Select, select
+from sqlalchemy import Row, Select, case, func, select
 
 from config import settings
 from core.logger import logger
@@ -36,6 +36,7 @@ _MISSING_OBJECT_CODES = {"403", "404", "NoSuchKey", "NotFound", "AccessDenied"}
 
 STATIC_SITEMAP_FOLDER = "static_sitemaps/"
 STATIC_SITEMAP_SUFFIXES = (".xml", ".xml.gz")
+SITEMAP_SITES = ("copart", "iaai")
 INDEX_NAME = "sitemap.xml"
 S3_DELETE_BATCH = 1000
 MAX_CONCURRENT_UPLOADS = 4
@@ -120,7 +121,17 @@ def _mb(size: int) -> float:
 
 
 def _lot_batch_statement() -> Select:
-    return (
+    """One public URL per auction lot id.
+
+    The page is ``/lot/{copart|iaai}/{lot_id}``. Several saved rows can share
+    that lot id and ``base_site`` under different site numbers, with different
+    vehicles. The lookup keeps numeric site 1 for copart and 2 for iaai when
+    that row exists, otherwise the active row. Emit that same row. Any other
+    copy would be a sitemap URL the page redirects.
+    """
+    base_site = func.lower(func.trim(SavedLots.base_site))
+    canonical_site = case((base_site == "copart", 1), (base_site == "iaai", 2))
+    ranked = (
         select(
             SavedLots.base_site,
             SavedLots.lot_id,
@@ -131,9 +142,34 @@ def _lot_batch_statement() -> Select:
             SavedLots.created_at,
             SavedLots.is_deleted,
             SavedLots.deleted_at,
+            func.row_number()
+            .over(
+                partition_by=(SavedLots.lot_id, base_site),
+                order_by=(
+                    case((SavedLots.site == canonical_site, 0), else_=1),
+                    SavedLots.is_deleted.asc(),
+                    SavedLots.id.desc(),
+                ),
+            )
+            .label("public_rank"),
         )
-        .where(SavedLots.base_site.is_not(None))
-        .order_by(SavedLots.lot_id, SavedLots.site)
+        .where(base_site.in_(SITEMAP_SITES))
+        .subquery()
+    )
+    return (
+        select(
+            ranked.c.base_site,
+            ranked.c.lot_id,
+            ranked.c.year,
+            ranked.c.make,
+            ranked.c.model,
+            ranked.c.vin,
+            ranked.c.created_at,
+            ranked.c.is_deleted,
+            ranked.c.deleted_at,
+        )
+        .where(ranked.c.public_rank == 1)
+        .order_by(ranked.c.lot_id, ranked.c.base_site)
         .execution_options(yield_per=FETCH_BATCH)
     )
 

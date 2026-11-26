@@ -1,10 +1,11 @@
 """Read indexed lots from saved_lots, fetching a sold lot's sale history from the provider once."""
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from pydantic import ValidationError
 from rfc9457 import NotFoundProblem
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auction_api.api import AuctionApiClient
@@ -33,14 +34,66 @@ def site_number(site: object) -> int | None:
     return int(AuctionApiUtils.normalize_auction_to_num(normalized))
 
 
+def _auction_name(site_num: int) -> str | None:
+    name = AuctionApiUtils.num_to_auction_name(site_num)
+    return name if name in {"copart", "iaai"} else None
+
+
+def site_match(site: object):
+    """Rows for one auction. `all` and a missing site stay unfiltered.
+
+    A catalog row can be stored with site 3 (`all`) while `base_site` names
+    copart or iaai. The public lot URL uses `base_site`, so that row belongs
+    to the named auction.
+    """
+    site_num = site_number(site)
+    if site_num is None:
+        return None
+    clauses = [SavedLots.site == site_num]
+    name = _auction_name(site_num)
+    if name is not None:
+        clauses.append(func.lower(func.trim(SavedLots.base_site)) == name)
+    return or_(*clauses)
+
+
+def prefer_canonical_rows(rows: Sequence[SavedLots], site: object) -> list[SavedLots]:
+    """Keep the numeric auction row when a lot id is also stored under another site.
+
+    Site 3 is the catalog copy used when copart or iaai has no row of its own.
+    A second site number with the same ``base_site`` is a different vehicle, and
+    the public page must not switch to it.
+    """
+    site_num = site_number(site)
+    if site_num is None:
+        return list(rows)
+    exact_ids = {row.lot_id for row in rows if row.site == site_num}
+    if not exact_ids:
+        return list(rows)
+    return [
+        row for row in rows if row.site == site_num or row.lot_id not in exact_ids
+    ]
+
+
+def row_matches_site(row: SavedLots, site: object) -> bool:
+    site_num = site_number(site)
+    if site_num is None:
+        return True
+    if row.site == site_num:
+        return True
+    name = _auction_name(site_num)
+    base_site = (row.base_site or "").strip().lower()
+    return name is not None and base_site == name
+
+
 async def find_saved_lot(db: AsyncSession, lot_id: int | str, site: object) -> SavedLots | None:
     statement = select(SavedLots).where(SavedLots.lot_id == str(lot_id))
-    site_num = site_number(site)
-    if site_num is not None:
-        statement = statement.where(SavedLots.site == site_num)
+    match = site_match(site)
+    if match is not None:
+        statement = statement.where(match)
     statement = statement.order_by(SavedLots.is_deleted.asc(), SavedLots.id.desc())
     result = await db.execute(statement)
-    return result.scalars().first()
+    chosen = prefer_canonical_rows(list(result.scalars().all()), site)
+    return chosen[0] if chosen else None
 
 
 async def find_saved_lots_by_vin(db: AsyncSession, vin: str) -> list[SavedLots]:
@@ -58,22 +111,21 @@ async def find_saved_vin_or_lot(
     vin_or_lot = vin_or_lot.replace(" ", "").upper()
     if vin_or_lot.isdigit():
         statement = select(SavedLots).where(SavedLots.lot_id == vin_or_lot)
-        site_num = site_number(site)
-        if site_num is not None:
-            statement = statement.where(SavedLots.site == site_num)
+        match = site_match(site)
+        if match is not None:
+            statement = statement.where(match)
         statement = statement.order_by(
             SavedLots.is_deleted.asc(),
             SavedLots.auction_date.desc().nulls_last(),
             SavedLots.id.desc(),
         )
         result = await db.execute(statement)
-        return list(result.scalars().all())
+        return prefer_canonical_rows(list(result.scalars().all()), site)
 
     rows = await find_saved_lots_by_vin(db, vin_or_lot)
-    site_num = site_number(site)
-    if site_num is not None:
-        rows = [row for row in rows if row.site == site_num]
-    return rows
+    return prefer_canonical_rows(
+        [row for row in rows if row_matches_site(row, site)], site
+    )
 
 
 # A live listing keeps its failed-auction record in sale_history. These three

@@ -11,6 +11,8 @@ from auction_api.types.db_lot import DBUpdateLot
 from auction_api.types.lot import BasicHistoryLot, BasicLot, FormGetType, SaleHistoryItem
 from database.models import Base, SavedLots
 from services.saved_lots_read import (
+    find_saved_lot,
+    find_saved_vin_or_lot,
     sales_from_row,
     saved_lot_to_model,
     store_archival_lots,
@@ -322,6 +324,82 @@ def test_deleted_row_stays_history_with_its_sale_result():
     assert lot.sale_status == "Sold"
     assert lot.sale_date == past
     assert lot.purchase_price == 5000
+
+
+def test_site_all_row_matches_its_base_site(db):
+    _, session_factory = db
+
+    async def seed():
+        async with session_factory() as session:
+            session.add_all(
+                [
+                    SavedLots(
+                        lot_id="51829456",
+                        site=3,
+                        base_site=" Copart ",
+                        vin="1GTCS19E878227153",
+                    ),
+                    SavedLots(lot_id="12", site=1, base_site="copart"),
+                ]
+            )
+            await session.commit()
+
+    asyncio.run(seed())
+
+    async def lookup(site, vin_or_lot):
+        async with session_factory() as session:
+            rows = await find_saved_vin_or_lot(session, site, vin_or_lot)
+            row = await find_saved_lot(session, vin_or_lot, site)
+            return [item.lot_id for item in rows], None if row is None else row.lot_id
+
+    assert asyncio.run(lookup("copart", "51829456")) == (["51829456"], "51829456")
+    assert asyncio.run(lookup("all", "51829456")) == (["51829456"], "51829456")
+    assert asyncio.run(lookup("iaai", "51829456")) == ([], None)
+    assert asyncio.run(lookup("1", "12")) == (["12"], "12")
+
+    async def by_vin(site):
+        async with session_factory() as session:
+            rows = await find_saved_vin_or_lot(session, site, "1gtcs19e878227153")
+            return [row.lot_id for row in rows]
+
+    assert asyncio.run(by_vin("copart")) == ["51829456"]
+    assert asyncio.run(by_vin("iaai")) == []
+
+
+def test_numeric_auction_row_wins_over_another_site_with_the_same_base_site(db):
+    _, session_factory = db
+
+    async def seed():
+        async with session_factory() as session:
+            session.add_all(
+                [
+                    SavedLots(
+                        lot_id="30104070",
+                        site=2,
+                        base_site="iaai",
+                        make="Volkswagen",
+                        is_deleted=True,
+                    ),
+                    SavedLots(
+                        lot_id="30104070",
+                        site=4,
+                        base_site="iaai",
+                        make="Ford",
+                        is_deleted=False,
+                    ),
+                ]
+            )
+            await session.commit()
+
+    asyncio.run(seed())
+
+    async def lookup():
+        async with session_factory() as session:
+            row = await find_saved_lot(session, "30104070", "iaai")
+            rows = await find_saved_vin_or_lot(session, "iaai", "30104070")
+            return None if row is None else row.make, [item.make for item in rows]
+
+    assert asyncio.run(lookup()) == ("Volkswagen", ["Volkswagen"])
 
 
 def test_sale_count_is_absent_from_current_lot_merge_sql():

@@ -1,9 +1,12 @@
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
 from botocore.exceptions import ClientError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from config import settings
+from database.models import Base, SavedLots
 from jobs.sitemap_generator import (
     SitemapChunkWriter,
     _lot_batch_statement,
@@ -61,7 +64,70 @@ def test_lot_batches_are_ordered_by_lot_and_site():
         _lot_batch_statement().compile(compile_kwargs={"literal_binds": True})
     ).lower().replace('"', "")
 
-    assert "order by saved_lots.lot_id, saved_lots.site" in compiled
+    assert "row_number" in compiled
+    assert "public_rank" in compiled
+    assert "copart" in compiled and "iaai" in compiled
+
+
+def test_sitemap_keeps_the_auction_row_and_a_lone_catalog_copy(tmp_path):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'lots.sqlite'}")
+    session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+    async def run():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as session:
+            session.add_all(
+                [
+                    SavedLots(
+                        lot_id="30104070",
+                        site=2,
+                        base_site="iaai",
+                        make="Volkswagen",
+                        is_deleted=True,
+                    ),
+                    SavedLots(
+                        lot_id="30104070",
+                        site=4,
+                        base_site="iaai",
+                        make="Ford",
+                        is_deleted=True,
+                    ),
+                    SavedLots(
+                        lot_id="51829456",
+                        site=3,
+                        base_site="copart",
+                        make="GMC",
+                        is_deleted=False,
+                    ),
+                    SavedLots(
+                        lot_id="77",
+                        site=3,
+                        base_site="iaai",
+                        make="Older",
+                        is_deleted=True,
+                    ),
+                    SavedLots(
+                        lot_id="77",
+                        site=4,
+                        base_site=" IAAI ",
+                        make="Newer",
+                        is_deleted=False,
+                    ),
+                ]
+            )
+            await session.commit()
+            result = await session.stream(_lot_batch_statement())
+            return {(row.lot_id, row.make) async for row in result}
+
+    try:
+        assert asyncio.run(run()) == {
+            ("30104070", "Volkswagen"),
+            ("51829456", "GMC"),
+            ("77", "Newer"),
+        }
+    finally:
+        asyncio.run(engine.dispose())
 
 
 def test_same_rows_produce_the_same_sitemap_bytes():
